@@ -1,0 +1,12 @@
+# Setlists may contain absolute paths to local REAPER projects.
+data/setlists/*.json
+!data/setlists/.gitkeep
+
+# Local experiments and recovery copies.
+main_backup_*.lua
+test_*.lua
+dump_fonts.lua
+
+# OS/editor files.
+.DS_Store
+Thumbs.db
