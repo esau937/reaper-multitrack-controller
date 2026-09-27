@@ -2597,7 +2597,9 @@ local function loop()
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowBorderSize(), 0.0)
 
   -- Resolve o bug de não conseguir "encolher" a doca
-  reaper.ImGui_SetNextWindowSizeConstraints(ctx, 100, 50, 99999, 99999)
+  -- A UI possui 50px de transporte e 152px de waveform; não permita que
+  -- uma docka baixa esconda todos os controles de mapa.
+  reaper.ImGui_SetNextWindowSizeConstraints(ctx, 100, 220, 99999, 99999)
   local visible, open = reaper.ImGui_Begin(ctx, "Multitrack##mc_final", true, wflags)
   reaper.ImGui_PopStyleColor(ctx, 3)
   reaper.ImGui_PopStyleVar(ctx, 4)
