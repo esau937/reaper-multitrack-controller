@@ -75,8 +75,10 @@ local ctx = reaper.ImGui_CreateContext("Multitrack Controller", reaper.ImGui_Con
 
 -- Cria fontes modernas e suaves para remover o aspecto pixelado
 local font = reaper.ImGui_CreateFont('Arial', 14)
-local font_large = reaper.ImGui_CreateFont('Arial', 18, reaper.ImGui_FontFlags_Bold())
-local font_small = reaper.ImGui_CreateFont('Arial', 10, reaper.ImGui_FontFlags_Bold())
+-- Algumas versões do ReaImGui aceitam somente família e tamanho.
+-- Evita falhar em instalações com uma API mais antiga.
+local font_large = reaper.ImGui_CreateFont('Arial', 18)
+local font_small = reaper.ImGui_CreateFont('Arial', 10)
 reaper.ImGui_Attach(ctx, font)
 reaper.ImGui_Attach(ctx, font_large)
 reaper.ImGui_Attach(ctx, font_small)
