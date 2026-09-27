@@ -83,6 +83,22 @@ reaper.ImGui_Attach(ctx, font)
 reaper.ImGui_Attach(ctx, font_large)
 reaper.ImGui_Attach(ctx, font_small)
 
+-- ReaImGui antigo exige o tamanho em PushFont; versões recentes aceitam
+-- somente contexto e fonte. Detectamos uma vez e funcionamos nos dois PCs.
+local push_font_needs_size = nil
+local function push_font_compat(font_to_push, size)
+  if push_font_needs_size == nil then
+    local ok = pcall(reaper.ImGui_PushFont, ctx, font_to_push, size)
+    push_font_needs_size = ok
+    if ok then return end
+  end
+  if push_font_needs_size then
+    reaper.ImGui_PushFont(ctx, font_to_push, size)
+  else
+    reaper.ImGui_PushFont(ctx, font_to_push)
+  end
+end
+
 -- ─── Color palette (0xRRGGBBAA) ──────────────────────────────────────────────
 
 local C = {
@@ -896,13 +912,13 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local btn_center_y = (r_min_y + r_max_y) / 2
     
     local txt = display_root or "?"
-    reaper.ImGui_PushFont(ctx, font, 14)
+    push_font_compat(font, 14)
     local w1, h1 = reaper.ImGui_CalcTextSize(ctx, txt)
     reaper.ImGui_PopFont(ctx)
     
     local w2, h2 = 0, 0
     if display_octave then
-      reaper.ImGui_PushFont(ctx, font_small, 10)
+      push_font_compat(font_small, 10)
       w2, h2 = reaper.ImGui_CalcTextSize(ctx, tostring(display_octave))
       reaper.ImGui_PopFont(ctx)
     end
@@ -910,12 +926,12 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local total_txt_w = w1 + w2 + (display_octave and 1 or 0)
     local txt_start_x = btn_center_x - (total_txt_w / 2)
     
-    reaper.ImGui_PushFont(ctx, font, 14)
+    push_font_compat(font, 14)
     reaper.ImGui_DrawList_AddText(draw_list, txt_start_x, btn_center_y - (h1/2), 0xFFFFFFFF, txt)
     reaper.ImGui_PopFont(ctx)
     
     if display_octave then
-      reaper.ImGui_PushFont(ctx, font_small, 10)
+      push_font_compat(font_small, 10)
       -- Alinha a oitava pela base do texto principal
       reaper.ImGui_DrawList_AddText(draw_list, txt_start_x + w1 + 1, btn_center_y + (h1/2) - h2 - 1, 0xFFFFFFFF, tostring(display_octave))
       reaper.ImGui_PopFont(ctx)
@@ -1751,7 +1767,7 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   
   reaper.ImGui_SetCursorScreenPos(ctx, x, y + title_y_offset)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), C.text)
-  reaper.ImGui_PushFont(ctx, font_large, 18)
+  push_font_compat(font_large, 18)
   reaper.ImGui_Text(ctx, sname)
   reaper.ImGui_PopFont(ctx)
   reaper.ImGui_PopStyleColor(ctx)
@@ -2609,7 +2625,7 @@ local function loop()
 
   if visible then
     -- Ativa a fonte moderna para tudo dentro da janela
-    reaper.ImGui_PushFont(ctx, font, 14)
+    push_font_compat(font, 14)
 
     -- Usar um Child Window resolve o bug do Reaper não deixar encolher a doca!
     reaper.ImGui_SetNextWindowSizeConstraints(ctx, 10, 10, 99999, 99999)
