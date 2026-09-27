@@ -2597,6 +2597,9 @@ local function loop()
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowBorderSize(), 0.0)
 
   -- Resolve o bug de não conseguir "encolher" a doca
+  -- O controlador é um painel fixo de palco: ele deve abrir completo, sem
+  -- exigir que o usuário redimensione a docka manualmente.
+  reaper.ImGui_SetNextWindowSize(ctx, rw, 220, reaper.ImGui_Cond_Always())
   -- A UI possui 50px de transporte e 152px de waveform; não permita que
   -- uma docka baixa esconda todos os controles de mapa.
   reaper.ImGui_SetNextWindowSizeConstraints(ctx, 100, 220, 99999, 99999)
