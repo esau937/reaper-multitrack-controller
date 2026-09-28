@@ -128,6 +128,29 @@ function AutomationModel.move_line_within_slide(model, line_id, slide_id, direct
   return true
 end
 
+function AutomationModel.reflow_slides(model, lines_per_slide)
+  lines_per_slide = math.max(1, math.min(tonumber(lines_per_slide) or 4, 4))
+  local ordered_lines, seen = {}, {}
+  for _, slide in ipairs(model.slides) do
+    for _, line_id in ipairs(slide.lineIds) do
+      if not seen[line_id] then
+        table.insert(ordered_lines, line_id)
+        seen[line_id] = true
+      end
+    end
+  end
+  for _, line in ipairs(model.lyrics.lines) do
+    if not seen[line.id] then table.insert(ordered_lines, line.id) end
+  end
+  local required = math.ceil(#ordered_lines / lines_per_slide)
+  while #model.slides < required do AutomationModel.add_slide(model) end
+  for _, slide in ipairs(model.slides) do slide.lineIds = {} end
+  for index, line_id in ipairs(ordered_lines) do
+    table.insert(model.slides[math.ceil(index / lines_per_slide)].lineIds, line_id)
+  end
+  return true
+end
+
 function AutomationModel.get_line(model, line_id)
   local _, line = find_line(model, line_id)
   return line

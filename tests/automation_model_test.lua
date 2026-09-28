@@ -28,6 +28,10 @@ local cue = assert(Model.add_cue(model, 42.5, "region-4", "SHOW_SLIDE", third_sl
 assert_equal(cue.displayId, "C1", "cues receive stable display IDs")
 assert_equal(#Model.validate(model), 0, "a cue references an existing slide")
 
+assert(Model.reflow_slides(model, 1))
+assert_equal(#model.slides, 3, "reflow creates additional slides when required")
+assert_equal(model.slides[3].lineIds[1], line_three.id, "reflow preserves line identity")
+
 model.cues = nil -- Simulates a project saved before the cue phase.
 local migrated_cue = assert(Model.add_cue(model, 55, "region-5", "SHOW_SLIDE", third_slide.id))
 assert_equal(#model.cues, 1, "older saved models are migrated when a cue is added")

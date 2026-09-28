@@ -2369,9 +2369,39 @@ local function render_automation_slides_editor(ctx)
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
+  reaper.ImGui_Text(ctx, "LINHAS POR SLIDE")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 60)
+  if reaper.ImGui_BeginCombo(ctx, "##slides_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
+    for _, option in ipairs({"1", "2", "3", "4"}) do
+      if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
+        state.holyrics_lines_per_slide = tonumber(option)
+        reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
+      end
+    end
+    reaper.ImGui_EndCombo(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "APLICAR", 90, 28) then
+    reaper.ImGui_OpenPopup(ctx, "Confirmar reorganização dos slides")
+  end
+  reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "+ NOVO SLIDE", 150, 28) then
     AutomationModel.add_slide(model)
     save_automation_model()
+  end
+
+  if reaper.ImGui_BeginPopupModal(ctx, "Confirmar reorganização dos slides", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+    reaper.ImGui_TextWrapped(ctx, "As linhas serão redistribuídas com a nova quantidade por slide. Os IDs L1, L2... serão preservados, mas os cues atuais continuarão ligados aos mesmos slides.")
+    if reaper.ImGui_Button(ctx, "APLICAR", 100, 0) then
+      AutomationModel.reflow_slides(model, state.holyrics_lines_per_slide)
+      state.automation_error = nil
+      save_automation_model()
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "CANCELAR", 100, 0) then reaper.ImGui_CloseCurrentPopup(ctx) end
+    reaper.ImGui_EndPopup(ctx)
   end
 end
 
@@ -2467,6 +2497,7 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "REMOVER", 76, 0) then
       AutomationModel.remove_cue(model, cue.id)
+      state.automation_error = nil
       save_automation_model()
     end
     reaper.ImGui_PopID(ctx)
