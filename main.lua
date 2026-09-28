@@ -194,6 +194,10 @@ local state = {
   lyrics_preview_animation = reaper.GetExtState("MultitrackController", "lyrics_preview_animation") ~= "" and reaper.GetExtState("MultitrackController", "lyrics_preview_animation") or "FADE",
   lyrics_preview_last_target = nil,
   lyrics_preview_transition_at = 0,
+  code_api_server = reaper.GetExtState("MultitrackController", "code_api_server"),
+  code_tcp_host = reaper.GetExtState("MultitrackController", "code_tcp_host"),
+  code_tcp_port = reaper.GetExtState("MultitrackController", "code_tcp_port"),
+  code_send_mode = reaper.GetExtState("MultitrackController", "code_send_mode") ~= "" and reaper.GetExtState("MultitrackController", "code_send_mode") or "API + TCP MIDI",
   holyrics_text = "",
   holyrics_parsed = {},
   holyrics_slides = {},
@@ -2536,6 +2540,54 @@ local function render_visual_click(ctx, position, is_playing)
   if is_playing then reaper.ImGui_PopStyleColor(ctx, 4) else pop_btn_style() end
 end
 
+local function render_route_editor(ctx)
+  reaper.ImGui_Text(ctx, "ROUTE")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Conexão da automação")
+  reaper.ImGui_Separator(ctx)
+
+  reaper.ImGui_Text(ctx, "API SERVER")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Endereço do programa na rede local")
+  reaper.ImGui_SetNextItemWidth(ctx, 420)
+  local api_changed, api_server = reaper.ImGui_InputText(ctx, "##code_api_server", state.code_api_server)
+  if api_changed then
+    state.code_api_server = api_server
+    reaper.SetExtState("MultitrackController", "code_api_server", api_server, true)
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 16)
+  reaper.ImGui_Text(ctx, "TCP MIDI")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Destino MIDI em rede")
+  reaper.ImGui_SetNextItemWidth(ctx, 260)
+  local host_changed, host = reaper.ImGui_InputText(ctx, "IP ou nome do computador##code_tcp_host", state.code_tcp_host)
+  if host_changed then
+    state.code_tcp_host = host
+    reaper.SetExtState("MultitrackController", "code_tcp_host", host, true)
+  end
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 120)
+  local port_changed, port = reaper.ImGui_InputText(ctx, "Porta##code_tcp_port", state.code_tcp_port)
+  if port_changed then
+    state.code_tcp_port = port
+    reaper.SetExtState("MultitrackController", "code_tcp_port", port, true)
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 16)
+  reaper.ImGui_Text(ctx, "MODO")
+  reaper.ImGui_SetNextItemWidth(ctx, 220)
+  if reaper.ImGui_BeginCombo(ctx, "##code_send_mode", state.code_send_mode) then
+    for _, mode in ipairs({"API + TCP MIDI", "API Server", "TCP MIDI"}) do
+      if reaper.ImGui_Selectable(ctx, mode, state.code_send_mode == mode) then
+        state.code_send_mode = mode
+        reaper.SetExtState("MultitrackController", "code_send_mode", mode, true)
+      end
+    end
+    reaper.ImGui_EndCombo(ctx)
+  end
+  reaper.ImGui_Dummy(ctx, 0, 22)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Os dados desta página serão usados na próxima etapa para conectar os temas e disparar os cues.")
+end
+
 local function render_automation_sync_editor(ctx)
   local model = state.automation_model
   if not model or #model.lyrics.lines == 0 then
@@ -2853,7 +2905,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
-    for index, view in ipairs({"LETRA", "SLIDES", "SYNC", "PREVIEW"}) do
+    for index, view in ipairs({"LETRA", "SLIDES", "SYNC", "PREVIEW", "ROUTE"}) do
       if index > 1 then reaper.ImGui_SameLine(ctx) end
       if reaper.ImGui_Button(ctx, view, 90, 26) then state.holyrics_editor_view = view end
     end
@@ -2888,6 +2940,8 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       render_automation_sync_editor(ctx)
     elseif state.holyrics_editor_view == "PREVIEW" then
       render_automation_preview(ctx)
+    elseif state.holyrics_editor_view == "ROUTE" then
+      render_route_editor(ctx)
     else
       -- The retired editor is intentionally no longer exposed in the UI.
       -- Fall back to the new lyric model if an old in-memory tab value remains.
