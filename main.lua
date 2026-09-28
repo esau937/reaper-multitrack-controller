@@ -188,6 +188,7 @@ local state = {
   show_render_modal = false,
   show_midi_mapping_modal = false,
   show_holyrics_modal = false,
+  show_lyrics_preview = false,
   holyrics_text = "",
   holyrics_parsed = {},
   holyrics_slides = {},
@@ -1079,6 +1080,9 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   reaper.ImGui_SetCursorScreenPos(ctx, marker_x, row1_y)
   push_btn_style()
   if reaper.ImGui_Button(ctx, "MIDI", marker_w, marker_h) then
+    reaper.ImGui_OpenPopup(ctx, "MidiActionsPopup")
+  elseif false then
+    -- Kept only as a future reference for the old region-note generator.
     local target_tr = nil
     local num_tracks = reaper.CountTracks(0)
     for i = 0, num_tracks - 1 do
@@ -1150,6 +1154,19 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     end
   end
   pop_btn_style()
+  reaper.ImGui_SetNextWindowSizeConstraints(ctx, 190, 0, 9999, 9999)
+  if reaper.ImGui_BeginPopup(ctx, "MidiActionsPopup") then
+    if reaper.ImGui_Selectable(ctx, "MIDI Mapping", false, 0, 0, 26) then
+      state.show_holyrics_modal = true
+      state.holyrics_editor_view = "SYNC"
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    if reaper.ImGui_Selectable(ctx, "Lyrics Preview", false, 0, 0, 26) then
+      state.show_lyrics_preview = true
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
 
   -- HOLYRICS (Linha 2)
   reaper.ImGui_SetCursorScreenPos(ctx, marker_x, row2_y)
@@ -2737,6 +2754,19 @@ local function render_automation_preview(ctx)
   reaper.ImGui_EndChild(ctx)
 end
 
+local function render_lyrics_preview_window(ctx, win_x, win_y, win_w, win_h)
+  if not state.show_lyrics_preview then return end
+  reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w / 2), win_y + (win_h / 2), reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
+  reaper.ImGui_SetNextWindowSize(ctx, 620, 330, reaper.ImGui_Cond_Appearing())
+  reaper.ImGui_SetNextWindowSizeConstraints(ctx, 440, 240, 1100, 700)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), 0x000000FF)
+  local visible, open = reaper.ImGui_Begin(ctx, "Lyrics Preview", true, reaper.ImGui_WindowFlags_NoCollapse())
+  if not open then state.show_lyrics_preview = false end
+  if visible then render_automation_preview(ctx) end
+  reaper.ImGui_End(ctx)
+  reaper.ImGui_PopStyleColor(ctx)
+end
+
 local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   if not state.show_holyrics_modal then return end
   
@@ -3261,6 +3291,7 @@ local function loop()
       render_render_modal(ctx, win_x, win_y, win_w, win_h)
       render_midi_mapping_modal(ctx, win_x, win_y, win_w, win_h)
       render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
+      render_lyrics_preview_window(ctx, win_x, win_y, win_w, win_h)
     end)
 
     if not ok then
