@@ -204,6 +204,7 @@ local state = {
   automation_new_line = "",
   automation_error = nil,
   automation_selected_slide_id = nil,
+  automation_selected_line_id = nil,
   cue_engine = CueEngine.new(),
   automation_simulation_log = "Aguardando playback...",
   render_format     = "WAV",
@@ -252,7 +253,12 @@ end
 local function log_simulated_cue(cue)
   local seconds = math.max(0, cue.time or 0)
   local time = string.format("%02d:%05.2f", math.floor(seconds / 60), seconds % 60)
-  local message = string.format("[%s] SIMULARIA: %s - %s", time, cue.action, cue.target)
+  local target = cue.target
+  if cue.action == "SHOW_LINE" and state.automation_model then
+    local line = AutomationModel.get_line(state.automation_model, cue.target)
+    if line then target = line.displayId end
+  end
+  local message = string.format("[%s] SIMULARIA: %s - %s", time, cue.action, target)
   local previous = state.automation_simulation_log or ""
   state.automation_simulation_log = message .. (previous ~= "" and "\n" .. previous or "")
 end
@@ -2410,31 +2416,42 @@ local function format_cue_time(seconds)
   return string.format("%02d:%05.2f", math.floor(seconds / 60), seconds % 60)
 end
 
+local function cue_target_label(model, cue)
+  if cue.action == "SHOW_LINE" then
+    local line = AutomationModel.get_line(model, cue.target)
+    return line and line.displayId or "?"
+  end
+  for _, slide in ipairs(model.slides) do
+    if slide.id == cue.target then return slide.displayId end
+  end
+  return "?"
+end
+
 local function render_automation_sync_editor(ctx)
   local model = state.automation_model
-  if not model or #model.slides == 0 then
-    reaper.ImGui_TextDisabled(ctx, "Gere as linhas e slides antes de criar cues.")
+  if not model or #model.lyrics.lines == 0 then
+    reaper.ImGui_TextDisabled(ctx, "Gere as linhas antes de criar cues.")
     return
   end
-  if not state.automation_selected_slide_id then state.automation_selected_slide_id = model.slides[1].id end
+  if not state.automation_selected_line_id then state.automation_selected_line_id = model.lyrics.lines[1].id end
 
   local regions = Sections.get_from_project(0)
   local cursor = reaper.GetCursorPosition()
-  local selected_slide = nil
-  for _, slide in ipairs(model.slides) do if slide.id == state.automation_selected_slide_id then selected_slide = slide end end
-  if not selected_slide then selected_slide = model.slides[1]; state.automation_selected_slide_id = selected_slide.id end
+  local selected_line = AutomationModel.get_line(model, state.automation_selected_line_id)
+  if not selected_line then selected_line = model.lyrics.lines[1]; state.automation_selected_line_id = selected_line.id end
 
   reaper.ImGui_Text(ctx, "SYNC - CUES MANUAIS")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Crie um cue no cursor do REAPER. MIDI ainda não é enviado nesta fase.")
   reaper.ImGui_Separator(ctx)
-  reaper.ImGui_Text(ctx, "Slide")
+  reaper.ImGui_Text(ctx, "Linha")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 160)
-  if reaper.ImGui_BeginCombo(ctx, "##cue_slide", selected_slide.displayId) then
-    for _, slide in ipairs(model.slides) do
-      if reaper.ImGui_Selectable(ctx, slide.displayId, slide.id == selected_slide.id) then
-        state.automation_selected_slide_id = slide.id
+  reaper.ImGui_SetNextItemWidth(ctx, 210)
+  if reaper.ImGui_BeginCombo(ctx, "##cue_line", selected_line.displayId .. " - " .. selected_line.text) then
+    for _, line in ipairs(model.lyrics.lines) do
+      local label = line.displayId .. " - " .. line.text
+      if reaper.ImGui_Selectable(ctx, label, line.id == selected_line.id) then
+        state.automation_selected_line_id = line.id
       end
     end
     reaper.ImGui_EndCombo(ctx)
@@ -2447,7 +2464,7 @@ local function render_automation_sync_editor(ctx)
     for _, region in ipairs(regions) do
       if cursor >= region.pos and cursor <= region.end_pos then region_id = tostring(region.idx); break end
     end
-    local cue, err = AutomationModel.add_cue(model, cursor, region_id, "SHOW_SLIDE", selected_slide.id)
+    local cue, err = AutomationModel.add_cue(model, cursor, region_id, "SHOW_LINE", selected_line.id)
     if cue then
       state.automation_error = nil
       save_automation_model()
@@ -2474,26 +2491,22 @@ local function render_automation_sync_editor(ctx)
   for _, cue in ipairs(model.cues or {}) do
     local x = bar_x + (cue.time / project_length) * bar_w
     reaper.ImGui_DrawList_AddLine(draw_list, x, bar_y + 4, x, bar_y + 56, HOLYRICS_ACCENT, 2)
-    local target = nil
-    for _, slide in ipairs(model.slides) do if slide.id == cue.target then target = slide.displayId; break end end
-    reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 56, HOLYRICS_ACCENT, target or "?")
+    reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 56, HOLYRICS_ACCENT, cue_target_label(model, cue))
   end
   reaper.ImGui_Dummy(ctx, bar_w, bar_h)
 
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_BeginChild(ctx, "##cue_list", 0, -62, true)
   if #(model.cues or {}) == 0 then
-    reaper.ImGui_TextDisabled(ctx, "Nenhum cue criado. Posicione o cursor e escolha um slide acima.")
+    reaper.ImGui_TextDisabled(ctx, "Nenhum cue criado. Posicione o cursor e escolha uma linha acima.")
   end
   for _, cue in ipairs(model.cues or {}) do
     reaper.ImGui_PushID(ctx, cue.id)
-    local slide_name = cue.target
-    for _, slide in ipairs(model.slides) do if slide.id == cue.target then slide_name = slide.displayId; break end end
     reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, cue.displayId)
     reaper.ImGui_SameLine(ctx, 55)
     reaper.ImGui_Text(ctx, format_cue_time(cue.time))
     reaper.ImGui_SameLine(ctx, 155)
-    reaper.ImGui_Text(ctx, cue.action .. " - " .. slide_name)
+    reaper.ImGui_Text(ctx, cue.action .. " - " .. cue_target_label(model, cue))
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "REMOVER", 76, 0) then
       AutomationModel.remove_cue(model, cue.id)

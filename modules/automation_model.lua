@@ -156,16 +156,22 @@ function AutomationModel.get_line(model, line_id)
   return line
 end
 
-function AutomationModel.add_cue(model, time, region_id, action, target_slide_id)
-  local _, slide = find_slide(model, target_slide_id)
-  if not slide then return nil, "Slide não encontrado: " .. tostring(target_slide_id) end
+function AutomationModel.add_cue(model, time, region_id, action, target_id)
+  action = action or "SHOW_SLIDE"
+  if action == "SHOW_LINE" then
+    local _, line = find_line(model, target_id)
+    if not line then return nil, "Linha não encontrada: " .. tostring(target_id) end
+  else
+    local _, slide = find_slide(model, target_id)
+    if not slide then return nil, "Slide não encontrado: " .. tostring(target_id) end
+  end
   -- Models saved before the cue phase do not contain this collection yet.
   -- Create it lazily so opening an older .RPP remains safe.
   model.cues = model.cues or {}
   local normalized_time = tonumber(time) or 0
   for _, existing in ipairs(model.cues) do
-    if existing.action == (action or "SHOW_SLIDE")
-      and existing.target == target_slide_id
+    if existing.action == action
+      and existing.target == target_id
       and math.abs(existing.time - normalized_time) < 0.001 then
       return nil, "Este slide já possui um cue neste ponto."
     end
@@ -177,8 +183,8 @@ function AutomationModel.add_cue(model, time, region_id, action, target_slide_id
     displayId = "C" .. number,
     time = normalized_time,
     regionId = region_id,
-    action = action or "SHOW_SLIDE",
-    target = target_slide_id,
+    action = action,
+    target = target_id,
   }
   table.insert(model.cues, cue)
   table.sort(model.cues, function(a, b)
@@ -252,6 +258,9 @@ function AutomationModel.validate(model)
       if type(cue.time) ~= "number" then table.insert(errors, "Cue " .. cue.id .. " tem tempo inválido.") end
       if cue.action == "SHOW_SLIDE" and not known_slides[cue.target] then
         table.insert(errors, "Cue " .. cue.id .. " referencia slide inexistente " .. tostring(cue.target) .. ".")
+      end
+      if cue.action == "SHOW_LINE" and not known_lines[cue.target] then
+        table.insert(errors, "Cue " .. cue.id .. " referencia linha inexistente " .. tostring(cue.target) .. ".")
       end
     end
   end
