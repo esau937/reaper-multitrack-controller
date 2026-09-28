@@ -200,6 +200,9 @@ local state = {
   code_tcp_port = reaper.GetExtState("MultitrackController", "code_tcp_port"),
   code_send_mode = reaper.GetExtState("MultitrackController", "code_send_mode") ~= "" and reaper.GetExtState("MultitrackController", "code_send_mode") or "API + TCP MIDI",
   code_api_status = nil,
+  holyrics_remote_open = false,
+  holyrics_remote_model = nil,
+  holyrics_remote_status = nil,
   holyrics_text = "",
   holyrics_parsed = {},
   holyrics_slides = {},
@@ -2564,6 +2567,83 @@ local function test_route_api(url, token)
   return nil, "Não foi possível ler os temas. Verifique token e permissões no Holyrics."
 end
 
+-- Executa uma ação real no API Server do Holyrics. O JSON é gravado num
+-- arquivo temporário para que letras com acentos, aspas e quebras de linha não
+-- sejam alteradas pelo prompt de comando do Windows.
+local function holyrics_post(action, payload, timeout)
+  local url = (state.code_api_server or ""):match("^%s*(.-)%s*$")
+  local token = (state.code_api_token or ""):match("^%s*(.-)%s*$")
+  if not url:match("^https?://[%w%._%-]+:%d+/?$") then
+    return nil, "Informe o endereço do API Server do Holyrics."
+  end
+  if token == "" or not token:match("^[%w_%-]+$") then
+    return nil, "Informe um token válido do Holyrics."
+  end
+  if not reaper.ExecProcess then return nil, "Esta versão do REAPER não possui o envio pela API." end
+
+  local encoded = json.encode(payload or {})
+  local request_file = reaper.GetResourcePath() .. "/holyrics-code-request.json"
+  local file, write_error = io.open(request_file, "wb")
+  if not file then return nil, "Não foi possível preparar o envio: " .. tostring(write_error) end
+  file:write(encoded)
+  file:close()
+
+  local request_url = url:gsub("/$", "") .. "/api/" .. action .. "?token=" .. token
+  local command = 'curl.exe -s -X POST -H "Content-Type: application/json" --data-binary @"' .. request_file
+    .. '" --connect-timeout 2 "' .. request_url .. '" -w "\\nHTTP:%{http_code}"'
+  local ok, output = pcall(reaper.ExecProcess, command, timeout or 2500)
+  os.remove(request_file)
+  if not ok or not output then return nil, "Não foi possível enviar ao Holyrics." end
+  output = tostring(output)
+  if output:match('"status"%s*:%s*"ok"') then return true end
+  if output:match("invalid token") then return nil, "O Holyrics recusou o token." end
+  if output:match("unauthorized") or output:match("permission") then
+    return nil, "Libere no token as permissões locais ShowQuickPresentation e ActionGoToIndex."
+  end
+  if output:match("HTTP:000") then return nil, "O Holyrics não respondeu. Confira se ele continua aberto na rede." end
+  return nil, "O Holyrics não aceitou esta ação. Confira as permissões do token."
+end
+
+local function holyrics_line_index(model, line_id)
+  for index, line in ipairs((model.lyrics or {}).lines or {}) do
+    if line.id == line_id then return index - 1 end -- Holyrics começa em zero.
+  end
+  return 0
+end
+
+local function open_holyrics_presentation(model, line_id)
+  if not model or not model.lyrics or #(model.lyrics.lines or {}) == 0 then
+    return nil, "Gere a letra antes de enviar para o Holyrics."
+  end
+  local slides = {}
+  for _, line in ipairs(model.lyrics.lines) do
+    slides[#slides + 1] = { text = line.text or "" }
+  end
+  local ok, err = holyrics_post("ShowQuickPresentation", {
+    slides = slides,
+    initial_index = holyrics_line_index(model, line_id)
+  }, 3500)
+  if ok then
+    state.holyrics_remote_open = true
+    state.holyrics_remote_model = model
+    return true, "Apresentação enviada ao Holyrics."
+  end
+  return nil, err
+end
+
+local function send_holyrics_line(cue)
+  if not cue or cue.action ~= "SHOW_LINE" then return end
+  if not state.holyrics_remote_open or state.holyrics_remote_model ~= state.automation_model then
+    local ok, err = open_holyrics_presentation(state.automation_model, cue.target)
+    state.holyrics_remote_status = { ok = ok, message = err or "Apresentação iniciada no Holyrics." }
+    return
+  end
+  local ok, err = holyrics_post("ActionGoToIndex", {
+    index = holyrics_line_index(state.automation_model, cue.target)
+  }, 1500)
+  state.holyrics_remote_status = { ok = ok, message = ok and "Linha enviada ao Holyrics." or err }
+end
+
 local function render_route_editor(ctx)
   reaper.ImGui_Text(ctx, "ROUTE")
   reaper.ImGui_SameLine(ctx)
@@ -2598,6 +2678,15 @@ local function render_route_editor(ctx)
   if state.code_api_status then
     reaper.ImGui_TextColored(ctx, state.code_api_status.ok and HOLYRICS_MAPPED_GREEN or C.red, state.code_api_status.message)
   end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "ABRIR APRESENTAÇÃO", 160, 0) then
+    local ok, message = open_holyrics_presentation(state.automation_model)
+    state.holyrics_remote_status = { ok = ok, message = message }
+  end
+  if state.holyrics_remote_status then
+    reaper.ImGui_TextColored(ctx, state.holyrics_remote_status.ok and HOLYRICS_MAPPED_GREEN or C.red, state.holyrics_remote_status.message)
+  end
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Para o envio ao vivo, libere no token: ShowQuickPresentation e ActionGoToIndex (Local).")
 
   reaper.ImGui_Dummy(ctx, 0, 16)
   reaper.ImGui_Text(ctx, "TCP MIDI")
@@ -2629,7 +2718,7 @@ local function render_route_editor(ctx)
     reaper.ImGui_EndCombo(ctx)
   end
   reaper.ImGui_Dummy(ctx, 0, 22)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Os dados desta página serão usados na próxima etapa para conectar os temas e disparar os cues.")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Durante o playback, cada L mapeada troca automaticamente a linha no Holyrics.")
 end
 
 local function render_automation_sync_editor(ctx)
@@ -3348,13 +3437,26 @@ local function loop()
   update_state()
 
   if state.automation_model then
-    CueEngine.update(
+    local automation_position = current_play_state == 1 and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+    local cue_state = CueEngine.update(
       state.cue_engine,
-      current_play_state == 1 and reaper.GetPlayPosition() or reaper.GetCursorPosition(),
+      automation_position,
       current_play_state == 1,
       state.automation_model.cues or {},
-      log_simulated_cue
+      function(cue)
+        log_simulated_cue(cue)
+        if state.code_send_mode ~= "TCP MIDI" then send_holyrics_line(cue) end
+      end
     )
+    -- Ao apertar Play no meio da música, abre a apresentação já na L correta.
+    -- Os próximos cues apenas avançam para a próxima linha, sem reabrir a tela.
+    if cue_state == "started" and state.code_send_mode ~= "TCP MIDI" then
+      local current_cue = active_line_cue(state.automation_model, automation_position)
+      local ok, message = open_holyrics_presentation(state.automation_model, current_cue and current_cue.target or nil)
+      state.holyrics_remote_status = { ok = ok, message = message }
+    elseif cue_state == "rewind" then
+      state.holyrics_remote_open = false
+    end
   end
 
   -- O duck é aplicado a cada projeto aberto, inclusive quando a aba muda durante a execução.
