@@ -83,9 +83,11 @@ local font = reaper.ImGui_CreateFont('Arial', 14)
 -- Evita falhar em instalações com uma API mais antiga.
 local font_large = reaper.ImGui_CreateFont('Arial', 18)
 local font_small = reaper.ImGui_CreateFont('Arial', 10)
+local font_preview = reaper.ImGui_CreateFont('Arial', 32)
 reaper.ImGui_Attach(ctx, font)
 reaper.ImGui_Attach(ctx, font_large)
 reaper.ImGui_Attach(ctx, font_small)
+reaper.ImGui_Attach(ctx, font_preview)
 
 -- ReaImGui v0.7 e anterior exige o tamanho em PushFont; a partir do v0.8
 -- a função recebe somente contexto e fonte. Não usamos uma chamada-teste:
@@ -2677,6 +2679,64 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_EndChild(ctx)
 end
 
+-- A faithful local output preview.  It intentionally uses the same cue and
+-- region rules as SYNC, making it the visual contract for Holyrics and Trackly.
+local function render_automation_preview(ctx)
+  local model = state.automation_model
+  if not model or #model.lyrics.lines == 0 then
+    reaper.ImGui_TextDisabled(ctx, "Gere e mapeie a letra antes de abrir a prévia.")
+    return
+  end
+
+  local is_playing = (reaper.GetPlayState() & 1) == 1
+  local position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+  local regions = Sections.get_from_project(0)
+  local current_region = region_at_position(regions, position)
+  local active_cue = active_line_cue(model, position)
+  if not region_has_line_cue(model, current_region) then active_cue = nil end
+
+  local active_slide = nil
+  if active_cue then
+    for _, slide in ipairs(model.slides or {}) do
+      for _, line_id in ipairs(slide.lineIds or {}) do
+        if line_id == active_cue.target then active_slide = slide; break end
+      end
+      if active_slide then break end
+    end
+  end
+
+  local preview_w, preview_h = reaper.ImGui_GetContentRegionAvail(ctx)
+  reaper.ImGui_BeginChild(ctx, "##live_lyric_preview", 0, preview_h, true)
+  reaper.ImGui_Text(ctx, "PRÉVIA AO VIVO")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, format_cue_time(position))
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, is_playing and "SINCRONIZADA COM PLAY" or "CURSOR PARADO")
+  reaper.ImGui_Separator(ctx)
+
+  if not active_slide then
+    reaper.ImGui_Dummy(ctx, 0, preview_h * 0.32)
+    reaper.ImGui_TextDisabled(ctx, "Aguardando uma linha mapeada nesta região.")
+  else
+    reaper.ImGui_Dummy(ctx, 0, math.max(28, preview_h * 0.20))
+    for _, line_id in ipairs(active_slide.lineIds) do
+      local line = AutomationModel.get_line(model, line_id)
+      if line then
+        local is_active = line.id == active_cue.target
+        push_font_compat(font_preview, 32)
+        local text_w = reaper.ImGui_CalcTextSize(ctx, line.text)
+        reaper.ImGui_SetCursorPosX(ctx, math.max(20, (preview_w - text_w) / 2))
+        reaper.ImGui_TextColored(ctx, is_active and HOLYRICS_MAPPED_GREEN or C.text, line.text)
+        reaper.ImGui_PopFont(ctx)
+        reaper.ImGui_Dummy(ctx, 0, 18)
+      end
+    end
+    reaper.ImGui_Dummy(ctx, 0, 22)
+    reaper.ImGui_TextColored(ctx, C.text_dim, active_slide.isTitle and "SLIDE DE TÍTULO" or "SLIDE " .. active_slide.displayId)
+  end
+  reaper.ImGui_EndChild(ctx)
+end
+
 local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   if not state.show_holyrics_modal then return end
   
@@ -2699,7 +2759,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
-    for index, view in ipairs({"LETRA", "SLIDES", "SYNC"}) do
+    for index, view in ipairs({"LETRA", "SLIDES", "SYNC", "PREVIEW"}) do
       if index > 1 then reaper.ImGui_SameLine(ctx) end
       if reaper.ImGui_Button(ctx, view, 90, 26) then state.holyrics_editor_view = view end
     end
@@ -2732,6 +2792,8 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       render_automation_slides_editor(ctx)
     elseif state.holyrics_editor_view == "SYNC" then
       render_automation_sync_editor(ctx)
+    elseif state.holyrics_editor_view == "PREVIEW" then
+      render_automation_preview(ctx)
     else
       -- The retired editor is intentionally no longer exposed in the UI.
       -- Fall back to the new lyric model if an old in-memory tab value remains.
