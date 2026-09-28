@@ -127,6 +127,7 @@ local C = {
 -- Holyrics is intentionally neutral: its status and identifiers use white,
 -- without changing the pink accent used by the rest of the controller.
 local HOLYRICS_ACCENT = 0xFFFFFFFF
+local HOLYRICS_MAPPED_GREEN = 0x22C55EFF
 
 -- ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -2427,6 +2428,42 @@ local function cue_target_label(model, cue)
   return "?"
 end
 
+local function region_at_position(regions, position)
+  for _, region in ipairs(regions) do
+    if position >= region.pos and position <= region.end_pos then return region end
+  end
+  return nil
+end
+
+local function active_line_cue(model, region, position)
+  if not region then return nil end
+  local active = nil
+  for _, cue in ipairs(model.cues or {}) do
+    if cue.action == "SHOW_LINE" and cue.regionId == tostring(region.idx) and cue.time <= position then
+      if not active or cue.time > active.time then active = cue end
+    end
+  end
+  return active
+end
+
+local function render_visual_click(ctx, position)
+  local _, beats = reaper.TimeMap2_timeToBeats(0, position)
+  local _, _, numerator = reaper.TimeMap_GetTimeSigAtTime(0, position)
+  numerator = math.max(1, math.min(tonumber(numerator) or 4, 12))
+  local active_beat = (math.floor(beats or 0) % numerator) + 1
+  reaper.ImGui_Text(ctx, "CLICK")
+  reaper.ImGui_SameLine(ctx)
+  for beat = 1, numerator do
+    local active = beat == active_beat
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), active and HOLYRICS_MAPPED_GREEN or C.btn_normal)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), active and HOLYRICS_MAPPED_GREEN or C.btn_hover)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), active and HOLYRICS_MAPPED_GREEN or C.btn_active)
+    reaper.ImGui_Button(ctx, tostring(beat) .. "##visual_click_" .. beat, 30, 24)
+    reaper.ImGui_PopStyleColor(ctx, 3)
+    if beat < numerator then reaper.ImGui_SameLine(ctx) end
+  end
+end
+
 local function render_automation_sync_editor(ctx)
   local model = state.automation_model
   if not model or #model.lyrics.lines == 0 then
@@ -2436,6 +2473,8 @@ local function render_automation_sync_editor(ctx)
   local regions = Sections.get_from_project(0)
   local is_playing = (reaper.GetPlayState() & 1) == 1
   local timeline_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+  local current_region = region_at_position(regions, timeline_position)
+  local current_line_cue = active_line_cue(model, current_region, timeline_position)
 
   reaper.ImGui_Text(ctx, "SYNC")
   reaper.ImGui_SameLine(ctx)
@@ -2448,6 +2487,8 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_Text(ctx, "TIMELINE")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, format_cue_time(timeline_position))
+  reaper.ImGui_SameLine(ctx)
+  render_visual_click(ctx, timeline_position)
   local bar_x, bar_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local bar_w = reaper.ImGui_GetContentRegionAvail(ctx)
   local bar_h = 74
@@ -2457,7 +2498,9 @@ local function render_automation_sync_editor(ctx)
   for _, region in ipairs(regions) do
     local x1 = bar_x + (region.pos / project_length) * bar_w
     local x2 = bar_x + (region.end_pos / project_length) * bar_w
-    reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 12, x2, bar_y + 48, region.color, 2)
+    local is_mapped_current = current_region and region.idx == current_region.idx and current_line_cue
+    local region_color = is_mapped_current and HOLYRICS_MAPPED_GREEN or region.color
+    reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 12, x2, bar_y + 48, region_color, 2)
     local label_w = reaper.ImGui_CalcTextSize(ctx, region.name)
     if (x2 - x1) >= label_w + 8 then
       reaper.ImGui_DrawList_AddText(draw_list, x1 + 3, bar_y + 18, C.text, region.name)
@@ -2516,7 +2559,13 @@ local function render_automation_sync_editor(ctx)
   for _, line in ipairs(model.lyrics.lines) do
     reaper.ImGui_PushID(ctx, "sync_" .. line.id)
     local label = line.displayId .. "  " .. line.text
-    if reaper.ImGui_Selectable(ctx, label, false, 0, 0) then
+    local is_active_line = current_line_cue and current_line_cue.target == line.id
+    if is_active_line then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), HOLYRICS_MAPPED_GREEN)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Header(), 0x14532D66)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderHovered(), 0x16653499)
+    end
+    if reaper.ImGui_Selectable(ctx, label, is_active_line, 0, 0) then
       local region_id = nil
       for _, region in ipairs(regions) do
         if timeline_position >= region.pos and timeline_position <= region.end_pos then region_id = tostring(region.idx); break end
@@ -2529,6 +2578,7 @@ local function render_automation_sync_editor(ctx)
         state.automation_error = err
       end
     end
+    if is_active_line then reaper.ImGui_PopStyleColor(ctx, 3) end
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
