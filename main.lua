@@ -202,6 +202,8 @@ local state = {
   holyrics_window_h = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_h")) or 900,
   automation_model = nil,
   automation_import_text = "",
+  automation_title_artist = "",
+  automation_title_song = "",
   automation_new_line = "",
   automation_error = nil,
   automation_selected_slide_id = nil,
@@ -2257,6 +2259,10 @@ local function render_automation_lyrics_editor(ctx)
     for _, line in ipairs(model.lyrics.lines) do table.insert(lines, line.text) end
     state.automation_import_text = table.concat(lines, "\n")
   end
+  if model and state.automation_title_artist == "" then
+    state.automation_title_artist = model.lyrics.titleArtist or ""
+    state.automation_title_song = model.lyrics.titleSong or ""
+  end
 
   local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
   local column_w = (available_w - 8) / 2
@@ -2266,6 +2272,19 @@ local function render_automation_lyrics_editor(ctx)
   reaper.ImGui_Separator(ctx)
   local changed, text = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics_source", state.automation_import_text, -1, -76)
   if changed then state.automation_import_text = text end
+  reaper.ImGui_Text(ctx, "LT - TÍTULO")
+  reaper.ImGui_SetNextItemWidth(ctx, -170)
+  local artist_changed, artist = reaper.ImGui_InputText(ctx, "##title_artist", state.automation_title_artist)
+  if artist_changed then state.automation_title_artist = artist end
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, -76)
+  local song_changed, song = reaper.ImGui_InputText(ctx, "##title_song", state.automation_title_song)
+  if song_changed then state.automation_title_song = song end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "LT", 64, 0) and model then
+    local title_line, err = AutomationModel.set_title_line(model, state.automation_title_artist, state.automation_title_song)
+    if title_line then save_automation_model() else state.automation_error = err end
+  end
   reaper.ImGui_Text(ctx, "Linhas por slide")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_SetNextItemWidth(ctx, 60)
@@ -2284,6 +2303,9 @@ local function render_automation_lyrics_editor(ctx)
       reaper.ImGui_OpenPopup(ctx, "Confirmar nova letra")
     else
       state.automation_model = AutomationModel.import_text(state.automation_import_text, state.holyrics_lines_per_slide)
+      if state.automation_title_artist:match("%S") or state.automation_title_song:match("%S") then
+        AutomationModel.set_title_line(state.automation_model, state.automation_title_artist, state.automation_title_song)
+      end
       save_automation_model()
     end
   end
@@ -2317,6 +2339,9 @@ local function render_automation_lyrics_editor(ctx)
     reaper.ImGui_TextWrapped(ctx, "Processar uma nova letra recriará linhas, slides e cues desta música. Continuar?")
     if reaper.ImGui_Button(ctx, "PROCESSAR", 120, 0) then
       state.automation_model = AutomationModel.import_text(state.automation_import_text, state.holyrics_lines_per_slide)
+      if state.automation_title_artist:match("%S") or state.automation_title_song:match("%S") then
+        AutomationModel.set_title_line(state.automation_model, state.automation_title_artist, state.automation_title_song)
+      end
       state.automation_selected_slide_id = nil
       state.cue_engine = CueEngine.new()
       save_automation_model()

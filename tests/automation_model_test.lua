@@ -9,9 +9,13 @@ local model = Model.import_text("Primeira linha\nSegunda linha\nTerceira linha",
 assert_equal(#model.lyrics.lines, 3, "imports every non-empty lyric line")
 assert_equal(#model.slides, 2, "creates slides using the requested initial grouping")
 assert_equal(model.lyrics.lines[3].displayId, "L3", "line display IDs are stable")
+local line_three = model.lyrics.lines[3]
+
+local title_line = assert(Model.set_title_line(model, "Artista", "Minha Música"))
+assert_equal(title_line.displayId, "LT", "title line uses the LT display ID")
+assert_equal(model.lyrics.lines[1].id, title_line.id, "title line is always first")
 
 local first_slide, second_slide = model.slides[1], model.slides[2]
-local line_three = model.lyrics.lines[3]
 assert(Model.move_line(model, line_three.id, first_slide.id))
 assert_equal(line_three.id, "line-3", "moving a line does not change its technical ID")
 assert_equal(line_three.displayId, "L3", "moving a line does not change its display ID")
@@ -36,8 +40,8 @@ assert(Model.move_cue(model, line_cue.id, 44.25))
 assert_equal(line_cue.time, 44.25, "a cue can be repositioned on the timeline")
 
 assert(Model.reflow_slides(model, 1))
-assert_equal(#model.slides, 3, "reflow creates additional slides when required")
-assert_equal(model.slides[3].lineIds[1], line_three.id, "reflow preserves line identity")
+assert_equal(#model.slides, 4, "reflow creates additional slides when required")
+assert_equal(model.slides[4].lineIds[1], line_three.id, "reflow preserves line identity")
 
 model.cues = nil -- Simulates a project saved before the cue phase.
 local migrated_cue = assert(Model.add_cue(model, 55, "region-5", "SHOW_SLIDE", third_slide.id))

@@ -82,6 +82,30 @@ function AutomationModel.add_line(model, text, slide_id, insert_at)
   return line
 end
 
+function AutomationModel.set_title_line(model, artist, title)
+  artist = (artist or ""):match("^%s*(.-)%s*$")
+  title = (title or ""):match("^%s*(.-)%s*$")
+  local text = artist ~= "" and title ~= "" and (artist .. " - " .. title) or (artist ~= "" and artist or title)
+  if text == "" then return nil, "Informe o cantor ou o título da música." end
+
+  local title_line = nil
+  for _, line in ipairs(model.lyrics.lines) do
+    if line.isTitle then title_line = line; break end
+  end
+  if not title_line then
+    title_line = { id = "line-title", displayId = "LT", text = text, isTitle = true }
+    table.insert(model.lyrics.lines, 1, title_line)
+    local first_slide = model.slides[1] or AutomationModel.add_slide(model)
+    remove_line_from_slides(model, title_line.id)
+    table.insert(first_slide.lineIds, 1, title_line.id)
+  else
+    title_line.text = text
+  end
+  model.lyrics.titleArtist = artist
+  model.lyrics.titleSong = title
+  return title_line
+end
+
 function AutomationModel.import_text(text, lines_per_slide)
   local model = AutomationModel.new()
   lines_per_slide = math.max(1, math.min(tonumber(lines_per_slide) or 4, 4))
