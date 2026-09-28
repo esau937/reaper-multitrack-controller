@@ -246,11 +246,20 @@ end
 local saved_automation, automation_load_error = AutomationStore.load(0)
 state.automation_model = saved_automation
 state.automation_error = automation_load_error
+if saved_automation then
+  local export_path, export_warning = AutomationStore.export_sidecar(saved_automation, 0)
+  state.automation_export_path = export_path
+  state.automation_export_warning = export_warning
+end
 
 local function save_automation_model()
   if not state.automation_model then return end
-  local ok, err = AutomationStore.save(state.automation_model, 0)
-  state.automation_error = ok and nil or err
+  local ok, path, export_error = AutomationStore.save(state.automation_model, 0)
+  state.automation_error = ok and nil or path
+  if ok then
+    state.automation_export_path = path
+    state.automation_export_warning = export_error
+  end
 end
 
 local function log_simulated_cue(cue)
@@ -2662,6 +2671,11 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     reaper.ImGui_Separator(ctx)
     if state.automation_error then
       reaper.ImGui_TextColored(ctx, C.red, "Automação: " .. state.automation_error)
+    end
+    if state.automation_export_warning then
+      reaper.ImGui_TextColored(ctx, C.yellow, "Trackly: " .. state.automation_export_warning)
+    elseif state.automation_export_path then
+      reaper.ImGui_TextColored(ctx, C.text_dim, "Mapa universal Trackly: " .. state.automation_export_path)
     end
 
     if state.holyrics_editor_view == "LETRA" then
