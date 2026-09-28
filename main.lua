@@ -2654,18 +2654,24 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_BeginChild(ctx, "##sync_slides_preview", 0, details_h, true)
   reaper.ImGui_Text(ctx, "SLIDES")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Visão geral")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Prévia da apresentação")
   reaper.ImGui_Separator(ctx)
   for _, slide in ipairs(model.slides or {}) do
-    local line_labels = {}
+    reaper.ImGui_PushID(ctx, "slide_preview_" .. slide.id)
+    if slide.isTitle then
+      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE DE TÍTULO")
+    else
+      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE " .. slide.displayId)
+    end
     for _, line_id in ipairs(slide.lineIds or {}) do
       local line = AutomationModel.get_line(model, line_id)
-      if line then table.insert(line_labels, line.displayId) end
+      if line then
+        reaper.ImGui_TextColored(ctx, C.text_dim, line.displayId)
+        reaper.ImGui_SameLine(ctx, 42)
+        reaper.ImGui_TextWrapped(ctx, line.text)
+      end
     end
-    reaper.ImGui_PushID(ctx, "slide_preview_" .. slide.id)
-    reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, slide.displayId)
-    reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_Text(ctx, table.concat(line_labels, "  ·  "))
+    reaper.ImGui_Separator(ctx)
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
