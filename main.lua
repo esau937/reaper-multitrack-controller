@@ -68,6 +68,7 @@ local Pads       = require("pads")
 local Repertoire = require("repertoire")
 local Chords = require("chords")
 local AutomationModel = require("automation_model")
+local AutomationStore = require("automation_store")
 
 Repertoire.init(SCRIPT_PATH)
 
@@ -190,6 +191,11 @@ local state = {
   holyrics_editing_line = nil,
   holyrics_editing_text = "",
   holyrics_editing_focused = false,
+  holyrics_editor_view = "LEGADO",
+  automation_model = nil,
+  automation_import_text = "",
+  automation_new_line = "",
+  automation_error = nil,
   render_format     = "WAV",
   render_path       = "",
   render_mode       = "TUDO",
@@ -221,6 +227,16 @@ if loaded_keys and loaded_keys ~= "" then
     end
     state.key_mappings = data
   end
+end
+
+local saved_automation, automation_load_error = AutomationStore.load(0)
+state.automation_model = saved_automation
+state.automation_error = automation_load_error
+
+local function save_automation_model()
+  if not state.automation_model then return end
+  local ok, err = AutomationStore.save(state.automation_model, 0)
+  state.automation_error = ok and nil or err
 end
 
 local function get_note_name(pitch)
@@ -2207,6 +2223,116 @@ local function move_lyric_line(s_idx, l_idx, dir)
   cleanup_empty_slides()
 end
 
+local function render_automation_lyrics_editor(ctx)
+  local model = state.automation_model
+  if not model then
+    reaper.ImGui_TextWrapped(ctx, "Cole a letra abaixo. O controlador criará IDs permanentes (L1, L2...) e slides iniciais sem depender das Regions.")
+    reaper.ImGui_Dummy(ctx, 0, 6)
+    local changed, text = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics_source", state.automation_import_text, -1, -220)
+    if changed then state.automation_import_text = text end
+    reaper.ImGui_Dummy(ctx, 0, 6)
+    reaper.ImGui_Text(ctx, "Linhas por slide inicial")
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 70)
+    if reaper.ImGui_BeginCombo(ctx, "##automation_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
+      for _, option in ipairs({"1", "2", "3", "4"}) do
+        if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
+          state.holyrics_lines_per_slide = tonumber(option)
+          reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
+        end
+      end
+      reaper.ImGui_EndCombo(ctx)
+    end
+    if reaper.ImGui_Button(ctx, "GERAR LINHAS E SLIDES", 210, 30) then
+      state.automation_model = AutomationModel.import_text(state.automation_import_text, state.holyrics_lines_per_slide)
+      save_automation_model()
+    end
+    return
+  end
+
+  reaper.ImGui_Text(ctx, "LINHAS — IDs permanentes")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Mover uma linha entre slides não altera seu ID.")
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_BeginChild(ctx, "##automation_lines", 0, -46, true)
+  for _, line in ipairs(model.lyrics.lines) do
+    reaper.ImGui_PushID(ctx, line.id)
+    reaper.ImGui_TextColored(ctx, C.accent, line.displayId)
+    reaper.ImGui_SameLine(ctx, 54)
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local changed, text = reaper.ImGui_InputText(ctx, "##text", line.text)
+    if changed then
+      line.text = text
+      save_automation_model()
+    end
+    reaper.ImGui_PopID(ctx)
+  end
+  reaper.ImGui_EndChild(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, -150)
+  local changed, text = reaper.ImGui_InputText(ctx, "##new_automation_line", state.automation_new_line)
+  if changed then state.automation_new_line = text end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "+ LINHA", 130, 0) and state.automation_new_line:match("%S") then
+    AutomationModel.add_line(model, state.automation_new_line)
+    state.automation_new_line = ""
+    save_automation_model()
+  end
+end
+
+local function render_automation_slides_editor(ctx)
+  local model = state.automation_model
+  if not model then
+    reaper.ImGui_TextDisabled(ctx, "Gere as linhas na aba LETRA antes de organizar os slides.")
+    return
+  end
+  reaper.ImGui_Text(ctx, "SLIDES")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Use as setas para reorganizar sem renumerar L1, L2...")
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_BeginChild(ctx, "##automation_slides", 0, -40, true)
+  for slide_index, slide in ipairs(model.slides) do
+    reaper.ImGui_PushID(ctx, slide.id)
+    reaper.ImGui_TextColored(ctx, C.accent, slide.displayId)
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, "SLIDE " .. string.format("%02d", slide_index))
+    reaper.ImGui_Separator(ctx)
+    for line_index, line_id in ipairs(slide.lineIds) do
+      local line = AutomationModel.get_line(model, line_id)
+      if line then
+        reaper.ImGui_PushID(ctx, line.id)
+        reaper.ImGui_TextColored(ctx, C.text_dim, line.displayId)
+        reaper.ImGui_SameLine(ctx, 48)
+        reaper.ImGui_Text(ctx, line.text)
+        reaper.ImGui_SameLine(ctx, -112)
+        if reaper.ImGui_Button(ctx, "^", 24, 0) then
+          if AutomationModel.move_line_within_slide(model, line.id, slide.id, -1) then save_automation_model() end
+        end
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "v", 24, 0) then
+          if AutomationModel.move_line_within_slide(model, line.id, slide.id, 1) then save_automation_model() end
+        end
+        reaper.ImGui_SameLine(ctx)
+        if slide_index > 1 and reaper.ImGui_Button(ctx, "<", 24, 0) then
+          if AutomationModel.move_line(model, line.id, model.slides[slide_index - 1].id) then save_automation_model() end
+        end
+        reaper.ImGui_SameLine(ctx)
+        if slide_index < #model.slides and reaper.ImGui_Button(ctx, ">", 24, 0) then
+          if AutomationModel.move_line(model, line.id, model.slides[slide_index + 1].id) then save_automation_model() end
+        end
+        reaper.ImGui_PopID(ctx)
+      end
+    end
+    if #slide.lineIds == 0 then reaper.ImGui_TextDisabled(ctx, "[Slide vazio]") end
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    reaper.ImGui_PopID(ctx)
+  end
+  reaper.ImGui_EndChild(ctx)
+  if reaper.ImGui_Button(ctx, "+ NOVO SLIDE", 150, 28) then
+    AutomationModel.add_slide(model)
+    save_automation_model()
+  end
+end
+
 local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   if not state.show_holyrics_modal then return end
   
@@ -2222,6 +2348,20 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   if not open then state.show_holyrics_modal = false end
   
   if visible then
+    for _, view in ipairs({"LEGADO", "LETRA", "SLIDES"}) do
+      if view ~= "LEGADO" then reaper.ImGui_SameLine(ctx) end
+      if reaper.ImGui_Button(ctx, view, 90, 26) then state.holyrics_editor_view = view end
+    end
+    reaper.ImGui_Separator(ctx)
+    if state.automation_error then
+      reaper.ImGui_TextColored(ctx, C.red, "Automação: " .. state.automation_error)
+    end
+
+    if state.holyrics_editor_view == "LETRA" then
+      render_automation_lyrics_editor(ctx)
+    elseif state.holyrics_editor_view == "SLIDES" then
+      render_automation_slides_editor(ctx)
+    else
     local proj_regions = {}
     local idx = 0
     while true do
@@ -2539,7 +2679,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     reaper.ImGui_EndChild(ctx)
     reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_EndGroup(ctx)
-    
+    end -- LEGADO editor
     reaper.ImGui_End(ctx)
   end
   reaper.ImGui_PopStyleColor(ctx, 3)

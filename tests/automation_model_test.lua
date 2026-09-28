@@ -17,6 +17,9 @@ assert_equal(line_three.id, "line-3", "moving a line does not change its technic
 assert_equal(line_three.displayId, "L3", "moving a line does not change its display ID")
 assert_equal(#Model.validate(model), 0, "a moved line remains valid and belongs to one slide")
 
+assert(Model.move_line_within_slide(model, model.lyrics.lines[2].id, first_slide.id, -1))
+assert_equal(first_slide.lineIds[1], model.lyrics.lines[2].id, "lines can be reordered without changing IDs")
+
 local third_slide = Model.add_slide(model)
 assert(Model.move_line(model, line_three.id, third_slide.id))
 assert_equal(#Model.validate(model), 0, "new slides can receive moved lines")

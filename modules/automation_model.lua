@@ -111,6 +111,25 @@ function AutomationModel.move_line(model, line_id, target_slide_id, target_index
   return true
 end
 
+function AutomationModel.move_line_within_slide(model, line_id, slide_id, direction)
+  local _, slide = find_slide(model, slide_id)
+  if not slide then return nil, "Slide não encontrado: " .. tostring(slide_id) end
+  local line_index = nil
+  for index, id in ipairs(slide.lineIds) do
+    if id == line_id then line_index = index; break end
+  end
+  if not line_index then return nil, "Linha não pertence ao slide informado." end
+  local destination = line_index + direction
+  if destination < 1 or destination > #slide.lineIds then return false end
+  slide.lineIds[line_index], slide.lineIds[destination] = slide.lineIds[destination], slide.lineIds[line_index]
+  return true
+end
+
+function AutomationModel.get_line(model, line_id)
+  local _, line = find_line(model, line_id)
+  return line
+end
+
 function AutomationModel.remove_slide(model, slide_id, destination_slide_id)
   local slide_index, slide = find_slide(model, slide_id)
   if not slide then return nil, "Slide não encontrado: " .. tostring(slide_id) end
