@@ -2353,7 +2353,7 @@ local function render_automation_sync_editor(ctx)
   for _, slide in ipairs(model.slides) do if slide.id == state.automation_selected_slide_id then selected_slide = slide end end
   if not selected_slide then selected_slide = model.slides[1]; state.automation_selected_slide_id = selected_slide.id end
 
-  reaper.ImGui_Text(ctx, "SYNC — CUES MANUAIS")
+  reaper.ImGui_Text(ctx, "SYNC - CUES MANUAIS")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Crie um cue no cursor do REAPER. MIDI ainda não é enviado nesta fase.")
   reaper.ImGui_Separator(ctx)
@@ -2390,7 +2390,10 @@ local function render_automation_sync_editor(ctx)
     local x1 = bar_x + (region.pos / project_length) * bar_w
     local x2 = bar_x + (region.end_pos / project_length) * bar_w
     reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 12, x2, bar_y + 48, region.color, 2)
-    reaper.ImGui_DrawList_AddText(draw_list, x1 + 3, bar_y + 18, C.text, region.name)
+    local label_w = reaper.ImGui_CalcTextSize(ctx, region.name)
+    if (x2 - x1) >= label_w + 8 then
+      reaper.ImGui_DrawList_AddText(draw_list, x1 + 3, bar_y + 18, C.text, region.name)
+    end
   end
   for _, cue in ipairs(model.cues or {}) do
     local x = bar_x + (cue.time / project_length) * bar_w
