@@ -1,0 +1,163 @@
+-- modules/automation_model.lua
+-- Stable data model for lyric lines and presentation slides.
+-- It deliberately has no REAPER or ImGui dependency so it can be tested in
+-- isolation and later shared by the editor, cue engine and output backends.
+
+local AutomationModel = {}
+
+local function index_by_id(items, id)
+  for index, item in ipairs(items) do
+    if item.id == id then return index, item end
+  end
+  return nil, nil
+end
+
+local function copy_list(items)
+  local copy = {}
+  for index, item in ipairs(items or {}) do copy[index] = item end
+  return copy
+end
+
+local function next_id(model, kind)
+  local key = kind == "line" and "nextLineNumber" or "nextSlideNumber"
+  local number = model[key] or 1
+  model[key] = number + 1
+  return kind .. "-" .. number, (kind == "line" and "L" or "S") .. number
+end
+
+local function find_line(model, line_id)
+  return index_by_id(model.lyrics.lines, line_id)
+end
+
+local function find_slide(model, slide_id)
+  return index_by_id(model.slides, slide_id)
+end
+
+local function remove_line_from_slides(model, line_id)
+  for _, slide in ipairs(model.slides) do
+    for index = #slide.lineIds, 1, -1 do
+      if slide.lineIds[index] == line_id then table.remove(slide.lineIds, index) end
+    end
+  end
+end
+
+function AutomationModel.new()
+  return {
+    schemaVersion = 1,
+    lyrics = { lines = {} },
+    slides = {},
+    nextLineNumber = 1,
+    nextSlideNumber = 1,
+  }
+end
+
+function AutomationModel.add_slide(model, line_ids, insert_at)
+  local id, display_id = next_id(model, "slide")
+  local slide = { id = id, displayId = display_id, lineIds = {} }
+  local position = math.max(1, math.min(insert_at or (#model.slides + 1), #model.slides + 1))
+  table.insert(model.slides, position, slide)
+
+  for _, line_id in ipairs(line_ids or {}) do
+    if find_line(model, line_id) then
+      remove_line_from_slides(model, line_id)
+      table.insert(slide.lineIds, line_id)
+    end
+  end
+  return slide
+end
+
+function AutomationModel.add_line(model, text, slide_id, insert_at)
+  local id, display_id = next_id(model, "line")
+  local line = { id = id, displayId = display_id, text = text or "" }
+  table.insert(model.lyrics.lines, line)
+
+  local _, slide = find_slide(model, slide_id)
+  if not slide then
+    slide = model.slides[#model.slides] or AutomationModel.add_slide(model)
+  end
+  local position = math.max(1, math.min(insert_at or (#slide.lineIds + 1), #slide.lineIds + 1))
+  table.insert(slide.lineIds, position, line.id)
+  return line
+end
+
+function AutomationModel.import_text(text, lines_per_slide)
+  local model = AutomationModel.new()
+  lines_per_slide = math.max(1, math.min(tonumber(lines_per_slide) or 4, 4))
+  local active_slide = nil
+  local line_count = 0
+  text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  for raw_line in (text .. "\n"):gmatch("(.-)\n") do
+    local value = raw_line:match("^%s*(.-)%s*$")
+    if value ~= "" then
+      if not active_slide or line_count >= lines_per_slide then
+        active_slide = AutomationModel.add_slide(model)
+        line_count = 0
+      end
+      AutomationModel.add_line(model, value, active_slide.id)
+      line_count = line_count + 1
+    end
+  end
+  return model
+end
+
+function AutomationModel.move_line(model, line_id, target_slide_id, target_index)
+  local _, line = find_line(model, line_id)
+  local _, target = find_slide(model, target_slide_id)
+  if not line then return nil, "Linha não encontrada: " .. tostring(line_id) end
+  if not target then return nil, "Slide não encontrado: " .. tostring(target_slide_id) end
+  remove_line_from_slides(model, line_id)
+  local position = math.max(1, math.min(target_index or (#target.lineIds + 1), #target.lineIds + 1))
+  table.insert(target.lineIds, position, line_id)
+  return true
+end
+
+function AutomationModel.remove_slide(model, slide_id, destination_slide_id)
+  local slide_index, slide = find_slide(model, slide_id)
+  if not slide then return nil, "Slide não encontrado: " .. tostring(slide_id) end
+  if #slide.lineIds > 0 then
+    local _, destination = find_slide(model, destination_slide_id)
+    if not destination or destination.id == slide_id then
+      return nil, "Escolha outro slide para receber as linhas antes de excluir."
+    end
+    for _, line_id in ipairs(copy_list(slide.lineIds)) do
+      table.insert(destination.lineIds, line_id)
+    end
+  end
+  table.remove(model.slides, slide_index)
+  return true
+end
+
+function AutomationModel.validate(model)
+  local errors, known_lines, referenced = {}, {}, {}
+  if type(model) ~= "table" or model.schemaVersion ~= 1 then
+    return { "Schema de automação inválido." }
+  end
+  for _, line in ipairs((model.lyrics or {}).lines or {}) do
+    if not line.id or known_lines[line.id] then
+      table.insert(errors, "Linha com ID ausente ou duplicado.")
+    else
+      known_lines[line.id] = true
+    end
+  end
+  for _, slide in ipairs(model.slides or {}) do
+    if not slide.id or type(slide.lineIds) ~= "table" then
+      table.insert(errors, "Slide inválido.")
+    else
+      for _, line_id in ipairs(slide.lineIds) do
+        if not known_lines[line_id] then
+          table.insert(errors, "Slide " .. slide.id .. " referencia linha inexistente " .. tostring(line_id) .. ".")
+        elseif referenced[line_id] then
+          table.insert(errors, "Linha " .. line_id .. " pertence a mais de um slide.")
+        else
+          referenced[line_id] = true
+        end
+      end
+    end
+  end
+  for line_id in pairs(known_lines) do
+    if not referenced[line_id] then table.insert(errors, "Linha " .. line_id .. " não pertence a nenhum slide.") end
+  end
+  return errors
+end
+
+return AutomationModel

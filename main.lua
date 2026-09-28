@@ -67,6 +67,7 @@ local Sections   = require("sections")
 local Pads       = require("pads")
 local Repertoire = require("repertoire")
 local Chords = require("chords")
+local AutomationModel = require("automation_model")
 
 Repertoire.init(SCRIPT_PATH)
 
