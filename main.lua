@@ -2668,6 +2668,19 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       if index > 1 then reaper.ImGui_SameLine(ctx) end
       if reaper.ImGui_Button(ctx, view, 90, 26) then state.holyrics_editor_view = view end
     end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "SALVAR MAPA", 128, 26) then
+      if state.automation_model then
+        save_automation_model()
+        if not state.automation_error then
+          -- Save the project itself too, so the embedded map and the portable
+          -- Trackly JSON always refer to the same revision of the song.
+          reaper.Main_SaveProject(0, false)
+        end
+      else
+        state.automation_error = "Não há letra mapeada para salvar."
+      end
+    end
     reaper.ImGui_Separator(ctx)
     if state.automation_error then
       reaper.ImGui_TextColored(ctx, C.red, "Automação: " .. state.automation_error)
