@@ -24,4 +24,8 @@ local third_slide = Model.add_slide(model)
 assert(Model.move_line(model, line_three.id, third_slide.id))
 assert_equal(#Model.validate(model), 0, "new slides can receive moved lines")
 
+local cue = assert(Model.add_cue(model, 42.5, "region-4", "SHOW_SLIDE", third_slide.id))
+assert_equal(cue.displayId, "C1", "cues receive stable display IDs")
+assert_equal(#Model.validate(model), 0, "a cue references an existing slide")
+
 print("automation_model_test: passed")

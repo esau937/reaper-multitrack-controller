@@ -46,8 +46,10 @@ function AutomationModel.new()
     schemaVersion = 1,
     lyrics = { lines = {} },
     slides = {},
+    cues = {},
     nextLineNumber = 1,
     nextSlideNumber = 1,
+    nextCueNumber = 1,
   }
 end
 
@@ -130,6 +132,31 @@ function AutomationModel.get_line(model, line_id)
   return line
 end
 
+function AutomationModel.add_cue(model, time, region_id, action, target_slide_id)
+  local _, slide = find_slide(model, target_slide_id)
+  if not slide then return nil, "Slide não encontrado: " .. tostring(target_slide_id) end
+  local number = model.nextCueNumber or 1
+  model.nextCueNumber = number + 1
+  local cue = {
+    id = "cue-" .. number,
+    displayId = "C" .. number,
+    time = tonumber(time) or 0,
+    regionId = region_id,
+    action = action or "SHOW_SLIDE",
+    target = target_slide_id,
+  }
+  table.insert(model.cues, cue)
+  table.sort(model.cues, function(a, b) return a.time < b.time end)
+  return cue
+end
+
+function AutomationModel.remove_cue(model, cue_id)
+  local index = index_by_id(model.cues, cue_id)
+  if not index then return nil, "Cue não encontrado: " .. tostring(cue_id) end
+  table.remove(model.cues, index)
+  return true
+end
+
 function AutomationModel.remove_slide(model, slide_id, destination_slide_id)
   local slide_index, slide = find_slide(model, slide_id)
   if not slide then return nil, "Slide não encontrado: " .. tostring(slide_id) end
@@ -147,7 +174,7 @@ function AutomationModel.remove_slide(model, slide_id, destination_slide_id)
 end
 
 function AutomationModel.validate(model)
-  local errors, known_lines, referenced = {}, {}, {}
+  local errors, known_lines, known_slides, referenced, known_cues = {}, {}, {}, {}, {}
   if type(model) ~= "table" or model.schemaVersion ~= 1 then
     return { "Schema de automação inválido." }
   end
@@ -162,6 +189,8 @@ function AutomationModel.validate(model)
     if not slide.id or type(slide.lineIds) ~= "table" then
       table.insert(errors, "Slide inválido.")
     else
+      if known_slides[slide.id] then table.insert(errors, "Slide com ID duplicado: " .. slide.id .. ".") end
+      known_slides[slide.id] = true
       for _, line_id in ipairs(slide.lineIds) do
         if not known_lines[line_id] then
           table.insert(errors, "Slide " .. slide.id .. " referencia linha inexistente " .. tostring(line_id) .. ".")
@@ -175,6 +204,17 @@ function AutomationModel.validate(model)
   end
   for line_id in pairs(known_lines) do
     if not referenced[line_id] then table.insert(errors, "Linha " .. line_id .. " não pertence a nenhum slide.") end
+  end
+  for _, cue in ipairs(model.cues or {}) do
+    if not cue.id or known_cues[cue.id] then
+      table.insert(errors, "Cue com ID ausente ou duplicado.")
+    else
+      known_cues[cue.id] = true
+      if type(cue.time) ~= "number" then table.insert(errors, "Cue " .. cue.id .. " tem tempo inválido.") end
+      if cue.action == "SHOW_SLIDE" and not known_slides[cue.target] then
+        table.insert(errors, "Cue " .. cue.id .. " referencia slide inexistente " .. tostring(cue.target) .. ".")
+      end
+    end
   end
   return errors
 end
