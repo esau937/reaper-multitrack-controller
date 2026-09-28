@@ -2446,22 +2446,32 @@ local function active_line_cue(model, region, position)
   return active
 end
 
-local function render_visual_click(ctx, position)
-  local _, beats = reaper.TimeMap2_timeToBeats(0, position)
-  local _, _, numerator = reaper.TimeMap_GetTimeSigAtTime(0, position)
-  numerator = math.max(1, math.min(tonumber(numerator) or 4, 12))
-  local active_beat = (math.floor(beats or 0) % numerator) + 1
+local function region_has_line_cue(model, region)
+  if not region then return false end
+  for _, cue in ipairs(model.cues or {}) do
+    if cue.action == "SHOW_LINE" and cue.regionId == tostring(region.idx) then return true end
+  end
+  return false
+end
+
+local function render_visual_click(ctx, position, is_playing)
+  local metro_text = "-"
+  if is_playing then
+    local beats = reaper.TimeMap2_timeToBeats(0, position)
+    metro_text = tostring(math.floor(beats or 0) + 1)
+  end
   reaper.ImGui_Text(ctx, "CLICK")
   reaper.ImGui_SameLine(ctx)
-  for beat = 1, numerator do
-    local active = beat == active_beat
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), active and HOLYRICS_MAPPED_GREEN or C.btn_normal)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), active and HOLYRICS_MAPPED_GREEN or C.btn_hover)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), active and HOLYRICS_MAPPED_GREEN or C.btn_active)
-    reaper.ImGui_Button(ctx, tostring(beat) .. "##visual_click_" .. beat, 30, 24)
-    reaper.ImGui_PopStyleColor(ctx, 3)
-    if beat < numerator then reaper.ImGui_SameLine(ctx) end
+  if is_playing then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0xFFFFFFFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0xEEEEEEFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0xFFFFFFFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x000000FF)
+  else
+    push_btn_style()
   end
+  reaper.ImGui_Button(ctx, metro_text .. "##sync_visual_click", 42, 24)
+  if is_playing then reaper.ImGui_PopStyleColor(ctx, 4) else pop_btn_style() end
 end
 
 local function render_automation_sync_editor(ctx)
@@ -2488,7 +2498,7 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, format_cue_time(timeline_position))
   reaper.ImGui_SameLine(ctx)
-  render_visual_click(ctx, timeline_position)
+  render_visual_click(ctx, timeline_position, is_playing)
   local bar_x, bar_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local bar_w = reaper.ImGui_GetContentRegionAvail(ctx)
   local bar_h = 74
@@ -2498,7 +2508,7 @@ local function render_automation_sync_editor(ctx)
   for _, region in ipairs(regions) do
     local x1 = bar_x + (region.pos / project_length) * bar_w
     local x2 = bar_x + (region.end_pos / project_length) * bar_w
-    local is_mapped_current = current_region and region.idx == current_region.idx and current_line_cue
+    local is_mapped_current = current_region and region.idx == current_region.idx and region_has_line_cue(model, current_region)
     local region_color = is_mapped_current and HOLYRICS_MAPPED_GREEN or region.color
     reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 12, x2, bar_y + 48, region_color, 2)
     local label_w = reaper.ImGui_CalcTextSize(ctx, region.name)
