@@ -2533,7 +2533,7 @@ local function render_automation_sync_editor(ctx)
   local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
   -- The timeline is the main working surface: give it the full width and a
   -- taller lane. Mapping details live in the compact panels underneath.
-  local timeline_h = math.max(154, math.min(230, available_h * 0.31))
+  local timeline_h = math.max(152, math.min(188, available_h * 0.25))
   reaper.ImGui_BeginChild(ctx, "##sync_timeline", 0, timeline_h, true)
   reaper.ImGui_Text(ctx, "TIMELINE")
   reaper.ImGui_SameLine(ctx)
@@ -2545,24 +2545,24 @@ local function render_automation_sync_editor(ctx)
   local bar_h = 118
   local project_length = math.max(reaper.GetProjectLength(0), 1)
   local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
-  reaper.ImGui_DrawList_AddRectFilled(draw_list, bar_x, bar_y + 16, bar_x + bar_w, bar_y + 78, 0x151515FF, 4)
+  reaper.ImGui_DrawList_AddRectFilled(draw_list, bar_x, bar_y + 14, bar_x + bar_w, bar_y + 90, 0x151515FF, 4)
   for _, region in ipairs(regions) do
     local x1 = bar_x + (region.pos / project_length) * bar_w
     local x2 = bar_x + (region.end_pos / project_length) * bar_w
     local is_mapped_current = current_region and region.idx == current_region.idx and region_has_line_cue(model, current_region)
     local region_color = is_mapped_current and HOLYRICS_MAPPED_GREEN or region.color
-    reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 16, x2, bar_y + 78, region_color, 2)
+    reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 14, x2, bar_y + 90, region_color, 2)
     local label_w = reaper.ImGui_CalcTextSize(ctx, region.name)
     if (x2 - x1) >= label_w + 8 then
-      reaper.ImGui_DrawList_AddText(draw_list, x1 + 5, bar_y + 37, C.text, region.name)
+      reaper.ImGui_DrawList_AddText(draw_list, x1 + 5, bar_y + 43, C.text, region.name)
     end
   end
   for _, cue in ipairs(model.cues or {}) do
     local x = bar_x + (cue.time / project_length) * bar_w
-    reaper.ImGui_DrawList_AddLine(draw_list, x, bar_y + 7, x, bar_y + 90, HOLYRICS_ACCENT, 2)
-    reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 92, HOLYRICS_ACCENT, cue_target_label(model, cue))
+    reaper.ImGui_DrawList_AddLine(draw_list, x, bar_y + 5, x, bar_y + 101, HOLYRICS_ACCENT, 2)
+    reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 103, HOLYRICS_ACCENT, cue_target_label(model, cue))
     reaper.ImGui_SetCursorScreenPos(ctx, x - 6, bar_y + 2)
-    reaper.ImGui_InvisibleButton(ctx, "##drag_cue_" .. cue.id, 12, 106)
+    reaper.ImGui_InvisibleButton(ctx, "##drag_cue_" .. cue.id, 12, 116)
     if reaper.ImGui_IsItemActive(ctx) and reaper.ImGui_IsMouseDown(ctx, 0) then
       local mouse_x = reaper.ImGui_GetMousePos(ctx)
       local ratio = math.max(0, math.min(1, (mouse_x - bar_x) / bar_w))
@@ -2571,7 +2571,7 @@ local function render_automation_sync_editor(ctx)
     if reaper.ImGui_IsItemHovered(ctx) then reaper.ImGui_SetTooltip(ctx, "Arraste para mover este mapa na timeline.") end
   end
   local playhead_x = bar_x + (timeline_position / project_length) * bar_w
-  reaper.ImGui_DrawList_AddLine(draw_list, playhead_x, bar_y, playhead_x, bar_y + 110, 0xFFFFFFFF, 2)
+  reaper.ImGui_DrawList_AddLine(draw_list, playhead_x, bar_y, playhead_x, bar_y + 120, 0xFFFFFFFF, 2)
   reaper.ImGui_SetCursorScreenPos(ctx, bar_x, bar_y)
   reaper.ImGui_InvisibleButton(ctx, "##timeline_scrub", bar_w, bar_h)
   if reaper.ImGui_IsItemActive(ctx) and reaper.ImGui_IsMouseDown(ctx, 0) then
@@ -2586,7 +2586,8 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_EndChild(ctx)
 
   local _, details_h = reaper.ImGui_GetContentRegionAvail(ctx)
-  local cue_panel_w = available_w * 0.43
+  local cue_panel_w = available_w * 0.28
+  local lyric_panel_w = available_w * 0.45
   reaper.ImGui_BeginChild(ctx, "##cue_list", cue_panel_w, details_h, true)
   reaper.ImGui_Text(ctx, "LINHAS MAPEADAS")
   reaper.ImGui_Separator(ctx)
@@ -2596,11 +2597,11 @@ local function render_automation_sync_editor(ctx)
   for _, cue in ipairs(model.cues or {}) do
     reaper.ImGui_PushID(ctx, cue.id)
     reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, cue.displayId)
-    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SameLine(ctx, 48)
     reaper.ImGui_Text(ctx, format_cue_time(cue.time))
-    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SameLine(ctx, 114)
     reaper.ImGui_Text(ctx, "LINE " .. cue_target_label(model, cue))
-    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SameLine(ctx, 204)
     if reaper.ImGui_Button(ctx, "REMOVER", 70, 0) then
       AutomationModel.remove_cue(model, cue.id)
       state.automation_error = nil
@@ -2611,7 +2612,7 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_EndChild(ctx)
 
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", 0, details_h, true)
+  reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, true)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Clique em uma linha para mapear no tempo atual.")
@@ -2645,6 +2646,26 @@ local function render_automation_sync_editor(ctx)
         state.automation_error = err
       end
     end
+    reaper.ImGui_PopID(ctx)
+  end
+  reaper.ImGui_EndChild(ctx)
+
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_BeginChild(ctx, "##sync_slides_preview", 0, details_h, true)
+  reaper.ImGui_Text(ctx, "SLIDES")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Visão geral")
+  reaper.ImGui_Separator(ctx)
+  for _, slide in ipairs(model.slides or {}) do
+    local line_labels = {}
+    for _, line_id in ipairs(slide.lineIds or {}) do
+      local line = AutomationModel.get_line(model, line_id)
+      if line then table.insert(line_labels, line.displayId) end
+    end
+    reaper.ImGui_PushID(ctx, "slide_preview_" .. slide.id)
+    reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, slide.displayId)
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, table.concat(line_labels, "  ·  "))
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
