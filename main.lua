@@ -2604,9 +2604,11 @@ local function holyrics_post(action, payload, timeout)
   return nil, "O Holyrics não aceitou esta ação. Confira as permissões do token."
 end
 
-local function holyrics_line_index(model, line_id)
-  for index, line in ipairs((model.lyrics or {}).lines or {}) do
-    if line.id == line_id then return index - 1 end -- Holyrics começa em zero.
+local function holyrics_slide_index(model, line_id)
+  for index, slide in ipairs(model.slides or {}) do
+    for _, slide_line_id in ipairs(slide.lineIds or {}) do
+      if slide_line_id == line_id then return index - 1 end -- Holyrics começa em zero.
+    end
   end
   return 0
 end
@@ -2616,12 +2618,20 @@ local function open_holyrics_presentation(model, line_id)
     return nil, "Gere a letra antes de enviar para o Holyrics."
   end
   local slides = {}
-  for _, line in ipairs(model.lyrics.lines) do
-    slides[#slides + 1] = { text = line.text or "" }
+  for _, slide in ipairs(model.slides or {}) do
+    local slide_lines = {}
+    for _, line_id in ipairs(slide.lineIds or {}) do
+      local line = AutomationModel.get_line(model, line_id)
+      if line then slide_lines[#slide_lines + 1] = line.text or "" end
+    end
+    if #slide_lines > 0 then
+      slides[#slides + 1] = { text = table.concat(slide_lines, "\n") }
+    end
   end
+  if #slides == 0 then return nil, "Não há slides de letra para enviar." end
   local ok, err = holyrics_post("ShowQuickPresentation", {
     slides = slides,
-    initial_index = holyrics_line_index(model, line_id)
+    initial_index = holyrics_slide_index(model, line_id)
   }, 3500)
   if ok then
     state.holyrics_remote_open = true
@@ -2639,7 +2649,7 @@ local function send_holyrics_line(cue)
     return
   end
   local ok, err = holyrics_post("ActionGoToIndex", {
-    index = holyrics_line_index(state.automation_model, cue.target)
+    index = holyrics_slide_index(state.automation_model, cue.target)
   }, 1500)
   state.holyrics_remote_status = { ok = ok, message = ok and "Linha enviada ao Holyrics." or err }
 end
@@ -2718,7 +2728,7 @@ local function render_route_editor(ctx)
     reaper.ImGui_EndCombo(ctx)
   end
   reaper.ImGui_Dummy(ctx, 0, 22)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Durante o playback, cada L mapeada troca automaticamente a linha no Holyrics.")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Durante o playback, cada L mapeada mostra no Holyrics o slide que contém essa linha.")
 end
 
 local function render_automation_sync_editor(ctx)
