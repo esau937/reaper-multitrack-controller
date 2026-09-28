@@ -138,18 +138,29 @@ function AutomationModel.add_cue(model, time, region_id, action, target_slide_id
   -- Models saved before the cue phase do not contain this collection yet.
   -- Create it lazily so opening an older .RPP remains safe.
   model.cues = model.cues or {}
+  local normalized_time = tonumber(time) or 0
+  for _, existing in ipairs(model.cues) do
+    if existing.action == (action or "SHOW_SLIDE")
+      and existing.target == target_slide_id
+      and math.abs(existing.time - normalized_time) < 0.001 then
+      return nil, "Este slide já possui um cue neste ponto."
+    end
+  end
   local number = model.nextCueNumber or 1
   model.nextCueNumber = number + 1
   local cue = {
     id = "cue-" .. number,
     displayId = "C" .. number,
-    time = tonumber(time) or 0,
+    time = normalized_time,
     regionId = region_id,
     action = action or "SHOW_SLIDE",
     target = target_slide_id,
   }
   table.insert(model.cues, cue)
-  table.sort(model.cues, function(a, b) return a.time < b.time end)
+  table.sort(model.cues, function(a, b)
+    if a.time == b.time then return a.id < b.id end
+    return a.time < b.time
+  end)
   return cue
 end
 

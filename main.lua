@@ -69,6 +69,7 @@ local Repertoire = require("repertoire")
 local Chords = require("chords")
 local AutomationModel = require("automation_model")
 local AutomationStore = require("automation_store")
+local CueEngine = require("cue_engine")
 
 Repertoire.init(SCRIPT_PATH)
 
@@ -197,6 +198,8 @@ local state = {
   automation_new_line = "",
   automation_error = nil,
   automation_selected_slide_id = nil,
+  cue_engine = CueEngine.new(),
+  automation_simulation_log = "Aguardando playback...",
   render_format     = "WAV",
   render_path       = "",
   render_mode       = "TUDO",
@@ -238,6 +241,14 @@ local function save_automation_model()
   if not state.automation_model then return end
   local ok, err = AutomationStore.save(state.automation_model, 0)
   state.automation_error = ok and nil or err
+end
+
+local function log_simulated_cue(cue)
+  local seconds = math.max(0, cue.time or 0)
+  local time = string.format("%02d:%05.2f", math.floor(seconds / 60), seconds % 60)
+  local message = string.format("[%s] SIMULARIA: %s - %s", time, cue.action, cue.target)
+  local previous = state.automation_simulation_log or ""
+  state.automation_simulation_log = message .. (previous ~= "" and "\n" .. previous or "")
 end
 
 local function get_note_name(pitch)
@@ -2376,8 +2387,13 @@ local function render_automation_sync_editor(ctx)
     for _, region in ipairs(regions) do
       if cursor >= region.pos and cursor <= region.end_pos then region_id = tostring(region.idx); break end
     end
-    AutomationModel.add_cue(model, cursor, region_id, "SHOW_SLIDE", selected_slide.id)
-    save_automation_model()
+    local cue, err = AutomationModel.add_cue(model, cursor, region_id, "SHOW_SLIDE", selected_slide.id)
+    if cue then
+      state.automation_error = nil
+      save_automation_model()
+    else
+      state.automation_error = err
+    end
   end
 
   local bar_x, bar_y = reaper.ImGui_GetCursorScreenPos(ctx)
@@ -2405,7 +2421,7 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_Dummy(ctx, bar_w, bar_h)
 
   reaper.ImGui_Separator(ctx)
-  reaper.ImGui_BeginChild(ctx, "##cue_list", 0, 0, true)
+  reaper.ImGui_BeginChild(ctx, "##cue_list", 0, -62, true)
   if #(model.cues or {}) == 0 then
     reaper.ImGui_TextDisabled(ctx, "Nenhum cue criado. Posicione o cursor e escolha um slide acima.")
   end
@@ -2417,7 +2433,7 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_SameLine(ctx, 55)
     reaper.ImGui_Text(ctx, format_cue_time(cue.time))
     reaper.ImGui_SameLine(ctx, 155)
-    reaper.ImGui_Text(ctx, cue.action .. " → " .. slide_name)
+    reaper.ImGui_Text(ctx, cue.action .. " - " .. slide_name)
     reaper.ImGui_SameLine(ctx, -40)
     if reaper.ImGui_Button(ctx, "X", 24, 0) then
       AutomationModel.remove_cue(model, cue.id)
@@ -2426,6 +2442,9 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
+  reaper.ImGui_TextColored(ctx, C.accent, "SIMULAÇÃO")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, state.automation_simulation_log or "Aguardando playback...")
 end
 
 local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
@@ -2812,6 +2831,16 @@ local function loop()
   state._last_play_state = current_play_state
 
   update_state()
+
+  if state.automation_model then
+    CueEngine.update(
+      state.cue_engine,
+      current_play_state == 1 and reaper.GetPlayPosition() or reaper.GetCursorPosition(),
+      current_play_state == 1,
+      state.automation_model.cues or {},
+      log_simulated_cue
+    )
+  end
 
   -- O duck é aplicado a cada projeto aberto, inclusive quando a aba muda durante a execução.
   if state.click_ducked then
