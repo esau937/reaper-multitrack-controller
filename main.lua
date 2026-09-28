@@ -2435,16 +2435,14 @@ local function region_at_position(regions, position)
   return nil
 end
 
-local function active_line_cue(model, region, position)
-  if not region then return nil end
+local function active_line_cue(model, position)
   local active = nil
   for _, cue in ipairs(model.cues or {}) do
     if cue.action == "SHOW_LINE" and cue.time <= position then
       if not active or cue.time > active.time then active = cue end
     end
   end
-  if active and active.regionId == tostring(region.idx) then return active end
-  return nil
+  return active
 end
 
 local function region_has_line_cue(model, region)
@@ -2485,7 +2483,8 @@ local function render_automation_sync_editor(ctx)
   local is_playing = (reaper.GetPlayState() & 1) == 1
   local timeline_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
   local current_region = region_at_position(regions, timeline_position)
-  local current_line_cue = active_line_cue(model, current_region, timeline_position)
+  local current_line_cue = active_line_cue(model, timeline_position)
+  if not region_has_line_cue(model, current_region) then current_line_cue = nil end
 
   reaper.ImGui_Text(ctx, "SYNC")
   reaper.ImGui_SameLine(ctx)
@@ -2521,6 +2520,14 @@ local function render_automation_sync_editor(ctx)
     local x = bar_x + (cue.time / project_length) * bar_w
     reaper.ImGui_DrawList_AddLine(draw_list, x, bar_y + 4, x, bar_y + 56, HOLYRICS_ACCENT, 2)
     reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 56, HOLYRICS_ACCENT, cue_target_label(model, cue))
+    reaper.ImGui_SetCursorScreenPos(ctx, x - 6, bar_y + 2)
+    reaper.ImGui_InvisibleButton(ctx, "##drag_cue_" .. cue.id, 12, 64)
+    if reaper.ImGui_IsItemActive(ctx) and reaper.ImGui_IsMouseDown(ctx, 0) then
+      local mouse_x = reaper.ImGui_GetMousePos(ctx)
+      local ratio = math.max(0, math.min(1, (mouse_x - bar_x) / bar_w))
+      if AutomationModel.move_cue(model, cue.id, ratio * project_length) then save_automation_model() end
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then reaper.ImGui_SetTooltip(ctx, "Arraste para mover este mapa na timeline.") end
   end
   local playhead_x = bar_x + (timeline_position / project_length) * bar_w
   reaper.ImGui_DrawList_AddLine(draw_list, playhead_x, bar_y, playhead_x, bar_y + 66, 0xFFFFFFFF, 2)
@@ -2571,12 +2578,19 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_PushID(ctx, "sync_" .. line.id)
     local label = line.displayId .. "  " .. line.text
     local is_active_line = current_line_cue and current_line_cue.target == line.id
+    local row_x, row_y = reaper.ImGui_GetCursorScreenPos(ctx)
+    local row_w = reaper.ImGui_GetContentRegionAvail(ctx)
     if is_active_line then
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), HOLYRICS_MAPPED_GREEN)
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Header(), 0x14532D66)
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderHovered(), 0x16653499)
+      local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+      reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), row_x, row_y, row_x + row_w, row_y + line_h, 0x14532D88)
+      reaper.ImGui_TextColored(ctx, HOLYRICS_MAPPED_GREEN, label)
+    else
+      reaper.ImGui_Text(ctx, label)
     end
-    if reaper.ImGui_Selectable(ctx, label, is_active_line, 0, 0) then
+    local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+    reaper.ImGui_SetCursorScreenPos(ctx, row_x, row_y)
+    reaper.ImGui_InvisibleButton(ctx, "##map_line", row_w, line_h)
+    if reaper.ImGui_IsItemClicked(ctx, 0) then
       local region_id = nil
       for _, region in ipairs(regions) do
         if timeline_position >= region.pos and timeline_position <= region.end_pos then region_id = tostring(region.idx); break end
@@ -2589,7 +2603,6 @@ local function render_automation_sync_editor(ctx)
         state.automation_error = err
       end
     end
-    if is_active_line then reaper.ImGui_PopStyleColor(ctx, 3) end
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)

@@ -202,6 +202,17 @@ function AutomationModel.remove_cue(model, cue_id)
   return true
 end
 
+function AutomationModel.move_cue(model, cue_id, time)
+  local _, cue = index_by_id(model.cues or {}, cue_id)
+  if not cue then return nil, "Cue não encontrado: " .. tostring(cue_id) end
+  cue.time = math.max(0, tonumber(time) or cue.time)
+  table.sort(model.cues, function(a, b)
+    if a.time == b.time then return a.id < b.id end
+    return a.time < b.time
+  end)
+  return true
+end
+
 function AutomationModel.remove_slide(model, slide_id, destination_slide_id)
   local slide_index, slide = find_slide(model, slide_id)
   if not slide then return nil, "Slide não encontrado: " .. tostring(slide_id) end

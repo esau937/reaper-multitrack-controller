@@ -32,6 +32,9 @@ local line_cue = assert(Model.add_cue(model, 43, "region-4", "SHOW_LINE", line_t
 assert_equal(line_cue.target, line_three.id, "a cue can target a stable lyric line")
 assert_equal(#Model.validate(model), 0, "a line cue references an existing line")
 
+assert(Model.move_cue(model, line_cue.id, 44.25))
+assert_equal(line_cue.time, 44.25, "a cue can be repositioned on the timeline")
+
 assert(Model.reflow_slides(model, 1))
 assert_equal(#model.slides, 3, "reflow creates additional slides when required")
 assert_equal(model.slides[3].lineIds[1], line_three.id, "reflow preserves line identity")
