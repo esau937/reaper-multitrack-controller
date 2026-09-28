@@ -28,4 +28,8 @@ local cue = assert(Model.add_cue(model, 42.5, "region-4", "SHOW_SLIDE", third_sl
 assert_equal(cue.displayId, "C1", "cues receive stable display IDs")
 assert_equal(#Model.validate(model), 0, "a cue references an existing slide")
 
+model.cues = nil -- Simulates a project saved before the cue phase.
+local migrated_cue = assert(Model.add_cue(model, 55, "region-5", "SHOW_SLIDE", third_slide.id))
+assert_equal(#model.cues, 1, "older saved models are migrated when a cue is added")
+
 print("automation_model_test: passed")

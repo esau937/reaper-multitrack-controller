@@ -135,6 +135,9 @@ end
 function AutomationModel.add_cue(model, time, region_id, action, target_slide_id)
   local _, slide = find_slide(model, target_slide_id)
   if not slide then return nil, "Slide não encontrado: " .. tostring(target_slide_id) end
+  -- Models saved before the cue phase do not contain this collection yet.
+  -- Create it lazily so opening an older .RPP remains safe.
+  model.cues = model.cues or {}
   local number = model.nextCueNumber or 1
   model.nextCueNumber = number + 1
   local cue = {
@@ -151,6 +154,7 @@ function AutomationModel.add_cue(model, time, region_id, action, target_slide_id
 end
 
 function AutomationModel.remove_cue(model, cue_id)
+  model.cues = model.cues or {}
   local index = index_by_id(model.cues, cue_id)
   if not index then return nil, "Cue não encontrado: " .. tostring(cue_id) end
   table.remove(model.cues, index)
