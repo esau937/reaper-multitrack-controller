@@ -2810,6 +2810,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_EndGroup(ctx)
     ]] -- retired legacy editor
+    end -- selected editor view
     reaper.ImGui_End(ctx)
   end
   reaper.ImGui_PopStyleColor(ctx, 3)
