@@ -222,6 +222,8 @@ local state = {
   holyrics_editor_view = "LETRA",
   holyrics_window_w = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_w")) or 1400,
   holyrics_window_h = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_h")) or 900,
+  holyrics_window_x = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_x")),
+  holyrics_window_y = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_y")),
   automation_model = nil,
   automation_import_text = "",
   automation_title_artist = "",
@@ -3169,7 +3171,11 @@ end
 local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   if not state.show_holyrics_modal then return end
   
-  reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w / 2), win_y + (win_h / 2), reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
+  -- A primeira abertura começa em uma posição segura. Depois disso, a janela
+  -- volta exatamente ao ponto em que o usuário a deixou.
+  local initial_x = state.holyrics_window_x or 80
+  local initial_y = state.holyrics_window_y or 70
+  reaper.ImGui_SetNextWindowPos(ctx, initial_x, initial_y, reaper.ImGui_Cond_Appearing())
   reaper.ImGui_SetNextWindowSize(ctx, state.holyrics_window_w, state.holyrics_window_h, reaper.ImGui_Cond_Appearing())
   reaper.ImGui_SetNextWindowSizeConstraints(ctx, 960, 680, 2400, 1800)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowRounding(), 8.0)
@@ -3179,6 +3185,13 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   
   local visible, open = reaper.ImGui_Begin(ctx, "HOLYRICS", true)
   if not open then state.show_holyrics_modal = false end
+
+  local actual_x, actual_y = reaper.ImGui_GetWindowPos(ctx)
+  if actual_x ~= state.holyrics_window_x or actual_y ~= state.holyrics_window_y then
+    state.holyrics_window_x, state.holyrics_window_y = actual_x, actual_y
+    reaper.SetExtState("MultitrackController", "holyrics_window_x", tostring(actual_x), true)
+    reaper.SetExtState("MultitrackController", "holyrics_window_y", tostring(actual_y), true)
+  end
   
   if visible then
     local actual_w, actual_h = reaper.ImGui_GetWindowSize(ctx)
