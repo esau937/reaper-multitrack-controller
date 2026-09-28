@@ -2435,23 +2435,18 @@ local function region_at_position(regions, position)
   return nil
 end
 
-local function active_line_cue(model, region, position)
+local function line_cue_for_region(model, region, position)
   if not region then return nil end
-  local active = nil
+  local first, active = nil, nil
   for _, cue in ipairs(model.cues or {}) do
-    if cue.action == "SHOW_LINE" and cue.regionId == tostring(region.idx) and cue.time <= position then
-      if not active or cue.time > active.time then active = cue end
+    if cue.action == "SHOW_LINE" and cue.regionId == tostring(region.idx) then
+      first = first or cue
+      if cue.time <= position and (not active or cue.time > active.time) then active = cue end
     end
   end
-  return active
-end
-
-local function region_has_line_cue(model, region)
-  if not region then return false end
-  for _, cue in ipairs(model.cues or {}) do
-    if cue.action == "SHOW_LINE" and cue.regionId == tostring(region.idx) then return true end
-  end
-  return false
+  -- Before the first cue in a mapped Region, keep its first mapped line active.
+  -- This makes the Region and lyric preview share one persistent state.
+  return active or first
 end
 
 local function render_visual_click(ctx, position, is_playing)
@@ -2484,7 +2479,7 @@ local function render_automation_sync_editor(ctx)
   local is_playing = (reaper.GetPlayState() & 1) == 1
   local timeline_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
   local current_region = region_at_position(regions, timeline_position)
-  local current_line_cue = active_line_cue(model, current_region, timeline_position)
+  local current_line_cue = line_cue_for_region(model, current_region, timeline_position)
 
   reaper.ImGui_Text(ctx, "SYNC")
   reaper.ImGui_SameLine(ctx)
@@ -2508,7 +2503,7 @@ local function render_automation_sync_editor(ctx)
   for _, region in ipairs(regions) do
     local x1 = bar_x + (region.pos / project_length) * bar_w
     local x2 = bar_x + (region.end_pos / project_length) * bar_w
-    local is_mapped_current = current_region and region.idx == current_region.idx and region_has_line_cue(model, current_region)
+    local is_mapped_current = current_region and region.idx == current_region.idx and current_line_cue
     local region_color = is_mapped_current and HOLYRICS_MAPPED_GREEN or region.color
     reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 12, x2, bar_y + 48, region_color, 2)
     local label_w = reaper.ImGui_CalcTextSize(ctx, region.name)
