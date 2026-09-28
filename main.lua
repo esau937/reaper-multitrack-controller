@@ -189,6 +189,11 @@ local state = {
   show_midi_mapping_modal = false,
   show_holyrics_modal = false,
   show_lyrics_preview = false,
+  lyrics_preview_lead = tonumber(reaper.GetExtState("MultitrackController", "lyrics_preview_lead")) or 0,
+  lyrics_preview_theme = reaper.GetExtState("MultitrackController", "lyrics_preview_theme") ~= "" and reaper.GetExtState("MultitrackController", "lyrics_preview_theme") or "ESCURO",
+  lyrics_preview_animation = reaper.GetExtState("MultitrackController", "lyrics_preview_animation") ~= "" and reaper.GetExtState("MultitrackController", "lyrics_preview_animation") or "FADE",
+  lyrics_preview_last_target = nil,
+  lyrics_preview_transition_at = 0,
   holyrics_text = "",
   holyrics_parsed = {},
   holyrics_slides = {},
@@ -2698,7 +2703,7 @@ end
 
 -- A faithful local output preview.  It intentionally uses the same cue and
 -- region rules as SYNC, making it the visual contract for Holyrics and Trackly.
-local function render_automation_preview(ctx)
+local function render_automation_preview(ctx, show_settings)
   local model = state.automation_model
   if not model or #model.lyrics.lines == 0 then
     reaper.ImGui_TextDisabled(ctx, "Gere e mapeie a letra antes de abrir a prévia.")
@@ -2706,7 +2711,8 @@ local function render_automation_preview(ctx)
   end
 
   local is_playing = (reaper.GetPlayState() & 1) == 1
-  local position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+  local transport_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+  local position = transport_position + (state.lyrics_preview_lead or 0)
   local regions = Sections.get_from_project(0)
   local current_region = region_at_position(regions, position)
   local active_cue = active_line_cue(model, position)
@@ -2723,18 +2729,74 @@ local function render_automation_preview(ctx)
   end
 
   local preview_w, preview_h = reaper.ImGui_GetContentRegionAvail(ctx)
+  local light_theme = state.lyrics_preview_theme == "CLARO"
+  local preview_bg = light_theme and 0xF5F5F5FF or 0x000000FF
+  local preview_text = light_theme and 0x181818FF or C.text
+  local preview_dim = light_theme and 0x666666FF or C.text_dim
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), preview_bg)
   reaper.ImGui_BeginChild(ctx, "##live_lyric_preview", 0, preview_h, true)
-  reaper.ImGui_Text(ctx, "PRÉVIA AO VIVO")
+  reaper.ImGui_TextColored(ctx, preview_text, "PRÉVIA AO VIVO")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, format_cue_time(position))
+  reaper.ImGui_TextColored(ctx, preview_dim, format_cue_time(transport_position))
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, is_playing and "SINCRONIZADA COM PLAY" or "CURSOR PARADO")
+  reaper.ImGui_TextColored(ctx, preview_dim, is_playing and "SINCRONIZADA COM PLAY" or "CURSOR PARADO")
+  if show_settings then
+    reaper.ImGui_SameLine(ctx, preview_w - 34)
+    if reaper.ImGui_Button(ctx, "⚙##lyrics_preview_settings", 26, 22) then
+      reaper.ImGui_OpenPopup(ctx, "LyricsPreviewSettings")
+    end
+    if reaper.ImGui_BeginPopup(ctx, "LyricsPreviewSettings") then
+      reaper.ImGui_Text(ctx, "ANTECIPAÇÃO DA LETRA")
+      reaper.ImGui_TextColored(ctx, preview_dim, "Mostra a próxima linha antes do cue.")
+      if reaper.ImGui_BeginCombo(ctx, "##preview_lead", string.format("%.1f s", state.lyrics_preview_lead)) then
+        for _, seconds in ipairs({0, 0.5, 1.0, 1.5, 2.0, 3.0}) do
+          local selected = state.lyrics_preview_lead == seconds
+          if reaper.ImGui_Selectable(ctx, string.format("%.1f s", seconds), selected) then
+            state.lyrics_preview_lead = seconds
+            reaper.SetExtState("MultitrackController", "lyrics_preview_lead", tostring(seconds), true)
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      reaper.ImGui_Separator(ctx)
+      reaper.ImGui_Text(ctx, "TEMA")
+      if reaper.ImGui_BeginCombo(ctx, "##preview_theme", state.lyrics_preview_theme) then
+        for _, theme in ipairs({"ESCURO", "CLARO"}) do
+          if reaper.ImGui_Selectable(ctx, theme, state.lyrics_preview_theme == theme) then
+            state.lyrics_preview_theme = theme
+            reaper.SetExtState("MultitrackController", "lyrics_preview_theme", theme, true)
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      reaper.ImGui_Text(ctx, "ANIMAÇÃO")
+      if reaper.ImGui_BeginCombo(ctx, "##preview_animation", state.lyrics_preview_animation) then
+        for _, animation in ipairs({"FADE", "SEM ANIMAÇÃO"}) do
+          if reaper.ImGui_Selectable(ctx, animation, state.lyrics_preview_animation == animation) then
+            state.lyrics_preview_animation = animation
+            reaper.SetExtState("MultitrackController", "lyrics_preview_animation", animation, true)
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      reaper.ImGui_EndPopup(ctx)
+    end
+  end
   reaper.ImGui_Separator(ctx)
 
   if not active_slide then
     reaper.ImGui_Dummy(ctx, 0, preview_h * 0.32)
-    reaper.ImGui_TextDisabled(ctx, "Aguardando uma linha mapeada nesta região.")
+    reaper.ImGui_TextColored(ctx, preview_dim, "Aguardando uma linha mapeada nesta região.")
   else
+    if state.lyrics_preview_last_target ~= active_cue.target then
+      state.lyrics_preview_last_target = active_cue.target
+      state.lyrics_preview_transition_at = reaper.time_precise()
+    end
+    local alpha = 255
+    if state.lyrics_preview_animation == "FADE" then
+      alpha = math.floor(math.min(1, (reaper.time_precise() - state.lyrics_preview_transition_at) / 0.22) * 255)
+    end
+    local function with_alpha(color) return (color & 0xFFFFFF00) | alpha end
     reaper.ImGui_Dummy(ctx, 0, math.max(28, preview_h * 0.20))
     for _, line_id in ipairs(active_slide.lineIds) do
       local line = AutomationModel.get_line(model, line_id)
@@ -2743,15 +2805,16 @@ local function render_automation_preview(ctx)
         push_font_compat(font_preview, 32)
         local text_w = reaper.ImGui_CalcTextSize(ctx, line.text)
         reaper.ImGui_SetCursorPosX(ctx, math.max(20, (preview_w - text_w) / 2))
-        reaper.ImGui_TextColored(ctx, is_active and HOLYRICS_MAPPED_GREEN or C.text, line.text)
+        reaper.ImGui_TextColored(ctx, with_alpha(is_active and HOLYRICS_MAPPED_GREEN or preview_text), line.text)
         reaper.ImGui_PopFont(ctx)
         reaper.ImGui_Dummy(ctx, 0, 18)
       end
     end
     reaper.ImGui_Dummy(ctx, 0, 22)
-    reaper.ImGui_TextColored(ctx, C.text_dim, active_slide.isTitle and "SLIDE DE TÍTULO" or "SLIDE " .. active_slide.displayId)
+    reaper.ImGui_TextColored(ctx, with_alpha(preview_dim), active_slide.isTitle and "SLIDE DE TÍTULO" or "SLIDE " .. active_slide.displayId)
   end
   reaper.ImGui_EndChild(ctx)
+  reaper.ImGui_PopStyleColor(ctx)
 end
 
 local function render_lyrics_preview_window(ctx, win_x, win_y, win_w, win_h)
@@ -2759,10 +2822,11 @@ local function render_lyrics_preview_window(ctx, win_x, win_y, win_w, win_h)
   reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w / 2), win_y + (win_h / 2), reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
   reaper.ImGui_SetNextWindowSize(ctx, 620, 330, reaper.ImGui_Cond_Appearing())
   reaper.ImGui_SetNextWindowSizeConstraints(ctx, 440, 240, 1100, 700)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), 0x000000FF)
+  local window_bg = state.lyrics_preview_theme == "CLARO" and 0xF5F5F5FF or 0x000000FF
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), window_bg)
   local visible, open = reaper.ImGui_Begin(ctx, "Lyrics Preview", true, reaper.ImGui_WindowFlags_NoCollapse())
   if not open then state.show_lyrics_preview = false end
-  if visible then render_automation_preview(ctx) end
+  if visible then render_automation_preview(ctx, true) end
   reaper.ImGui_End(ctx)
   reaper.ImGui_PopStyleColor(ctx)
 end
