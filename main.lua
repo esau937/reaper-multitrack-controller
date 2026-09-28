@@ -2433,46 +2433,21 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_TextDisabled(ctx, "Gere as linhas antes de criar cues.")
     return
   end
-  if not state.automation_selected_line_id then state.automation_selected_line_id = model.lyrics.lines[1].id end
-
   local regions = Sections.get_from_project(0)
-  local cursor = reaper.GetCursorPosition()
-  local selected_line = AutomationModel.get_line(model, state.automation_selected_line_id)
-  if not selected_line then selected_line = model.lyrics.lines[1]; state.automation_selected_line_id = selected_line.id end
+  local is_playing = (reaper.GetPlayState() & 1) == 1
+  local timeline_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
 
-  reaper.ImGui_Text(ctx, "SYNC - CUES MANUAIS")
+  reaper.ImGui_Text(ctx, "SYNC")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Crie um cue no cursor do REAPER. MIDI ainda não é enviado nesta fase.")
+  reaper.ImGui_TextColored(ctx, C.text_dim, is_playing and "Playback em andamento - clique na linha no momento desejado." or "Posicione o cursor ou dê Play e clique na linha desejada.")
   reaper.ImGui_Separator(ctx)
-  reaper.ImGui_Text(ctx, "Linha")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 210)
-  if reaper.ImGui_BeginCombo(ctx, "##cue_line", selected_line.displayId .. " - " .. selected_line.text) then
-    for _, line in ipairs(model.lyrics.lines) do
-      local label = line.displayId .. " - " .. line.text
-      if reaper.ImGui_Selectable(ctx, label, line.id == selected_line.id) then
-        state.automation_selected_line_id = line.id
-      end
-    end
-    reaper.ImGui_EndCombo(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "Cursor: " .. format_cue_time(cursor))
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "+ CUE NO CURSOR", 150, 26) then
-    local region_id = nil
-    for _, region in ipairs(regions) do
-      if cursor >= region.pos and cursor <= region.end_pos then region_id = tostring(region.idx); break end
-    end
-    local cue, err = AutomationModel.add_cue(model, cursor, region_id, "SHOW_LINE", selected_line.id)
-    if cue then
-      state.automation_error = nil
-      save_automation_model()
-    else
-      state.automation_error = err
-    end
-  end
 
+  local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
+  local timeline_w = available_w * 0.68
+  reaper.ImGui_BeginChild(ctx, "##sync_timeline", timeline_w, available_h, true)
+  reaper.ImGui_Text(ctx, "TIMELINE")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, format_cue_time(timeline_position))
   local bar_x, bar_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local bar_w = reaper.ImGui_GetContentRegionAvail(ctx)
   local bar_h = 74
@@ -2493,12 +2468,14 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_DrawList_AddLine(draw_list, x, bar_y + 4, x, bar_y + 56, HOLYRICS_ACCENT, 2)
     reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 56, HOLYRICS_ACCENT, cue_target_label(model, cue))
   end
+  local playhead_x = bar_x + (timeline_position / project_length) * bar_w
+  reaper.ImGui_DrawList_AddLine(draw_list, playhead_x, bar_y, playhead_x, bar_y + 66, 0xFFFFFFFF, 2)
   reaper.ImGui_Dummy(ctx, bar_w, bar_h)
 
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_BeginChild(ctx, "##cue_list", 0, -62, true)
   if #(model.cues or {}) == 0 then
-    reaper.ImGui_TextDisabled(ctx, "Nenhum cue criado. Posicione o cursor e escolha uma linha acima.")
+    reaper.ImGui_TextDisabled(ctx, "Nenhuma linha mapeada ainda. Clique numa linha da letra à direita.")
   end
   for _, cue in ipairs(model.cues or {}) do
     reaper.ImGui_PushID(ctx, cue.id)
@@ -2519,6 +2496,33 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SIMULAÇÃO")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, state.automation_simulation_log or "Aguardando playback...")
+  reaper.ImGui_EndChild(ctx)
+
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", 0, available_h, true)
+  reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Clique em uma linha para mapear no tempo atual.")
+  reaper.ImGui_Separator(ctx)
+  for _, line in ipairs(model.lyrics.lines) do
+    reaper.ImGui_PushID(ctx, "sync_" .. line.id)
+    local label = line.displayId .. "  " .. line.text
+    if reaper.ImGui_Selectable(ctx, label, false, 0, 0) then
+      local region_id = nil
+      for _, region in ipairs(regions) do
+        if timeline_position >= region.pos and timeline_position <= region.end_pos then region_id = tostring(region.idx); break end
+      end
+      local cue, err = AutomationModel.add_cue(model, timeline_position, region_id, "SHOW_LINE", line.id)
+      if cue then
+        state.automation_error = nil
+        save_automation_model()
+      else
+        state.automation_error = err
+      end
+    end
+    reaper.ImGui_PopID(ctx)
+  end
+  reaper.ImGui_EndChild(ctx)
 end
 
 local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
