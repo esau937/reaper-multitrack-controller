@@ -260,6 +260,31 @@ if loaded_keys and loaded_keys ~= "" then
   end
 end
 
+-- Um destino representa um computador que está executando o Holyrics. Mantemos
+-- a configuração antiga como o primeiro destino, para projetos já configurados.
+local saved_holyrics_targets = reaper.GetExtState("MultitrackController", "code_api_targets")
+local targets_ok, decoded_targets = pcall(json.decode, saved_holyrics_targets or "")
+if targets_ok and type(decoded_targets) == "table" and #decoded_targets > 0 then
+  state.code_api_targets = decoded_targets
+else
+  state.code_api_targets = {
+    {
+      name = "Holyrics 1",
+      url = state.code_api_server or "",
+      token = state.code_api_token or ""
+    }
+  }
+end
+
+local function save_holyrics_targets()
+  reaper.SetExtState("MultitrackController", "code_api_targets", json.encode(state.code_api_targets), true)
+  -- Compatibilidade com a primeira versão da configuração de rota.
+  local first = state.code_api_targets[1] or {}
+  state.code_api_server, state.code_api_token = first.url or "", first.token or ""
+  reaper.SetExtState("MultitrackController", "code_api_server", state.code_api_server, true)
+  reaper.SetExtState("MultitrackController", "code_api_token", state.code_api_token, true)
+end
+
 local saved_automation, automation_load_error = AutomationStore.load(0)
 state.automation_model = saved_automation
 state.automation_error = automation_load_error
@@ -2570,9 +2595,10 @@ end
 -- Executa uma ação real no API Server do Holyrics. O JSON é gravado num
 -- arquivo temporário para que letras com acentos, aspas e quebras de linha não
 -- sejam alteradas pelo prompt de comando do Windows.
-local function holyrics_post(action, payload, timeout)
-  local url = (state.code_api_server or ""):match("^%s*(.-)%s*$")
-  local token = (state.code_api_token or ""):match("^%s*(.-)%s*$")
+local function holyrics_post(action, payload, timeout, target)
+  target = target or state.code_api_targets[1] or {}
+  local url = (target.url or ""):match("^%s*(.-)%s*$")
+  local token = (target.token or ""):match("^%s*(.-)%s*$")
   if not url:match("^https?://[%w%._%-]+:%d+/?$") then
     return nil, "Informe o endereço do API Server do Holyrics."
   end
@@ -2629,16 +2655,22 @@ local function open_holyrics_presentation(model, line_id)
     end
   end
   if #slides == 0 then return nil, "Não há slides de letra para enviar." end
-  local ok, err = holyrics_post("ShowQuickPresentation", {
-    slides = slides,
-    initial_index = holyrics_slide_index(model, line_id)
-  }, 3500)
-  if ok then
+  local delivered, failures = 0, {}
+  for _, target in ipairs(state.code_api_targets or {}) do
+    local ok, err = holyrics_post("ShowQuickPresentation", {
+      slides = slides,
+      initial_index = holyrics_slide_index(model, line_id)
+    }, 3500, target)
+    target.status = { ok = ok, message = ok and "Conectado" or err }
+    if ok then delivered = delivered + 1 else failures[#failures + 1] = (target.name or "Holyrics") .. ": " .. (err or "erro") end
+  end
+  if delivered > 0 then
     state.holyrics_remote_open = true
     state.holyrics_remote_model = model
-    return true, "Apresentação enviada ao Holyrics."
+    if #failures == 0 then return true, "Apresentação enviada para " .. delivered .. " Holyrics." end
+    return nil, "Enviado para " .. delivered .. "; falhou em " .. table.concat(failures, " | ")
   end
-  return nil, err
+  return nil, #failures > 0 and table.concat(failures, " | ") or "Nenhum destino Holyrics foi configurado."
 end
 
 local function send_holyrics_line(cue)
@@ -2648,10 +2680,19 @@ local function send_holyrics_line(cue)
     state.holyrics_remote_status = { ok = ok, message = err or "Apresentação iniciada no Holyrics." }
     return
   end
-  local ok, err = holyrics_post("ActionGoToIndex", {
-    index = holyrics_slide_index(state.automation_model, cue.target)
-  }, 1500)
-  state.holyrics_remote_status = { ok = ok, message = ok and "Linha enviada ao Holyrics." or err }
+  local delivered, failures = 0, {}
+  for _, target in ipairs(state.code_api_targets or {}) do
+    local ok, err = holyrics_post("ActionGoToIndex", {
+      index = holyrics_slide_index(state.automation_model, cue.target)
+    }, 1500, target)
+    target.status = { ok = ok, message = ok and "Conectado" or err }
+    if ok then delivered = delivered + 1 else failures[#failures + 1] = target.name or "Holyrics" end
+  end
+  state.holyrics_remote_status = {
+    ok = delivered > 0 and #failures == 0,
+    message = #failures == 0 and ("Slide enviado para " .. delivered .. " Holyrics.")
+      or ("Slide enviado para " .. delivered .. "; falhou: " .. table.concat(failures, ", "))
+  }
 end
 
 local function render_route_editor(ctx)
@@ -2660,33 +2701,48 @@ local function render_route_editor(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Conexão da automação")
   reaper.ImGui_Separator(ctx)
 
-  reaper.ImGui_Text(ctx, "API SERVER")
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Endereço do programa na rede local")
-  reaper.ImGui_SetNextItemWidth(ctx, 420)
-  local api_changed, api_server = reaper.ImGui_InputText(ctx, "##code_api_server", state.code_api_server)
-  if api_changed then
-    state.code_api_server = api_server
-    state.code_api_status = nil
-    reaper.SetExtState("MultitrackController", "code_api_server", api_server, true)
-  end
-  reaper.ImGui_Text(ctx, "TOKEN")
+  reaper.ImGui_Text(ctx, "DESTINOS HOLYRICS")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "criado em Gerenciar permissões")
-  reaper.ImGui_SetNextItemWidth(ctx, 420)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Um destino para cada PC que exibirá a letra")
   local password_flag = reaper.ImGui_InputTextFlags_Password and reaper.ImGui_InputTextFlags_Password() or 0
-  local token_changed, token = reaper.ImGui_InputText(ctx, "##code_api_token", state.code_api_token, password_flag)
-  if token_changed then
-    state.code_api_token = token
-    state.code_api_status = nil
-    reaper.SetExtState("MultitrackController", "code_api_token", token, true)
+  local remove_index = nil
+  for index, target in ipairs(state.code_api_targets or {}) do
+    reaper.ImGui_PushID(ctx, index)
+    reaper.ImGui_SetNextItemWidth(ctx, 130)
+    local name_changed, name = reaper.ImGui_InputText(ctx, "Nome", target.name or ("Holyrics " .. index))
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 260)
+    local url_changed, url = reaper.ImGui_InputText(ctx, "Endereço", target.url or "")
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 220)
+    local token_changed, token = reaper.ImGui_InputText(ctx, "Token", target.token or "", password_flag)
+    if name_changed or url_changed or token_changed then
+      target.name, target.url, target.token = name, url, token
+      target.status = nil
+      save_holyrics_targets()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "TESTAR") then
+      local ok, message = test_route_api(target.url, target.token)
+      target.status = { ok = ok, message = message }
+    end
+    if #state.code_api_targets > 1 then
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "REMOVER") then remove_index = index end
+    end
+    if target.status then
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_TextColored(ctx, target.status.ok and HOLYRICS_MAPPED_GREEN or C.red, target.status.message)
+    end
+    reaper.ImGui_PopID(ctx)
   end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "TESTAR API", 110, 0) then
-    local ok, message = test_route_api(state.code_api_server, state.code_api_token)
-    state.code_api_status = { ok = ok, message = message }
+  if remove_index then
+    table.remove(state.code_api_targets, remove_index)
+    save_holyrics_targets()
   end
-  if state.code_api_status then
-    reaper.ImGui_TextColored(ctx, state.code_api_status.ok and HOLYRICS_MAPPED_GREEN or C.red, state.code_api_status.message)
+  if reaper.ImGui_Button(ctx, "+ ADICIONAR HOLYRICS", 180, 0) then
+    state.code_api_targets[#state.code_api_targets + 1] = { name = "Holyrics " .. (#state.code_api_targets + 1), url = "", token = "" }
+    save_holyrics_targets()
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "ABRIR APRESENTAÇÃO", 160, 0) then
