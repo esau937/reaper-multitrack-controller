@@ -195,6 +195,7 @@ local state = {
   lyrics_preview_last_target = nil,
   lyrics_preview_transition_at = 0,
   code_api_server = reaper.GetExtState("MultitrackController", "code_api_server"),
+  code_api_token = reaper.GetExtState("MultitrackController", "code_api_token"),
   code_tcp_host = reaper.GetExtState("MultitrackController", "code_tcp_host"),
   code_tcp_port = reaper.GetExtState("MultitrackController", "code_tcp_port"),
   code_send_mode = reaper.GetExtState("MultitrackController", "code_send_mode") ~= "" and reaper.GetExtState("MultitrackController", "code_send_mode") or "API + TCP MIDI",
@@ -2541,20 +2542,26 @@ local function render_visual_click(ctx, position, is_playing)
   if is_playing then reaper.ImGui_PopStyleColor(ctx, 4) else pop_btn_style() end
 end
 
-local function test_route_api(url)
+local function test_route_api(url, token)
   url = (url or ""):match("^%s*(.-)%s*$")
   if not url:match("^https?://[%w%._%-]+:%d+/?$") then
     return nil, "Informe um endereço no formato http://IP:PORTA."
   end
+  token = (token or ""):match("^%s*(.-)%s*$")
+  if token == "" then return nil, "Cole o token do API Server para testar as permissões." end
+  if not token:match("^[%w_%-]+$") then return nil, "Token inválido. Cole o código exibido pelo Holyrics sem espaços." end
   if not reaper.ExecProcess then
     return nil, "Esta versão do REAPER não possui o teste de conexão."
   end
+  local request_url = url:gsub("/$", "") .. "/api/GetThemes?token=" .. token
   local ok, output = pcall(reaper.ExecProcess,
-    'curl.exe -s -o NUL -w "%{http_code}" --connect-timeout 2 "' .. url .. '"', 3500)
+    'curl.exe -s -X POST -H "Content-Type: application/json" -d "{}" --connect-timeout 2 "' .. request_url .. '" -w "\nHTTP:%{http_code}"', 3500)
   if not ok or not output then return nil, "Não foi possível executar o teste de conexão." end
-  local code = tostring(output):match("(%d%d%d)")
-  if code and code ~= "000" then return true, "Conectado ao API Server (HTTP " .. code .. ")." end
-  return nil, "Não foi possível alcançar o API Server. Verifique IP, porta e Firewall."
+  output = tostring(output)
+  if output:match('"status"%s*:%s*"ok"') then return true, "Conexão autorizada. Temas do Holyrics prontos para sincronizar." end
+  if output:match("invalid token") then return nil, "O token não foi aceito pelo Holyrics." end
+  if output:match("unauthorized") or output:match("permission") then return nil, "O token não tem permissão para ler os temas." end
+  return nil, "Não foi possível ler os temas. Verifique token e permissões no Holyrics."
 end
 
 local function render_route_editor(ctx)
@@ -2572,9 +2579,20 @@ local function render_route_editor(ctx)
     state.code_api_status = nil
     reaper.SetExtState("MultitrackController", "code_api_server", api_server, true)
   end
+  reaper.ImGui_Text(ctx, "TOKEN")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "criado em Gerenciar permissões")
+  reaper.ImGui_SetNextItemWidth(ctx, 420)
+  local password_flag = reaper.ImGui_InputTextFlags_Password and reaper.ImGui_InputTextFlags_Password() or 0
+  local token_changed, token = reaper.ImGui_InputText(ctx, "##code_api_token", state.code_api_token, password_flag)
+  if token_changed then
+    state.code_api_token = token
+    state.code_api_status = nil
+    reaper.SetExtState("MultitrackController", "code_api_token", token, true)
+  end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "TESTAR API", 110, 0) then
-    local ok, message = test_route_api(state.code_api_server)
+    local ok, message = test_route_api(state.code_api_server, state.code_api_token)
     state.code_api_status = { ok = ok, message = message }
   end
   if state.code_api_status then
