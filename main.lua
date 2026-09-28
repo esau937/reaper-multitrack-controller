@@ -124,6 +124,10 @@ local C = {
   ruler_text  = 0x555555FF,
 }
 
+-- Holyrics is intentionally neutral: its status and identifiers use white,
+-- without changing the pink accent used by the rest of the controller.
+local HOLYRICS_ACCENT = 0xFFFFFFFF
+
 -- ─── Layout constants ─────────────────────────────────────────────────────────
 
 local PANEL_H      = 165
@@ -2239,57 +2243,81 @@ end
 
 local function render_automation_lyrics_editor(ctx)
   local model = state.automation_model
-  if not model then
-    reaper.ImGui_TextWrapped(ctx, "Cole a letra abaixo. O controlador criará IDs permanentes (L1, L2...) e slides iniciais sem depender das Regions.")
-    reaper.ImGui_Dummy(ctx, 0, 6)
-    local changed, text = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics_source", state.automation_import_text, -1, -220)
-    if changed then state.automation_import_text = text end
-    reaper.ImGui_Dummy(ctx, 0, 6)
-    reaper.ImGui_Text(ctx, "Linhas por slide inicial")
-    reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, 70)
-    if reaper.ImGui_BeginCombo(ctx, "##automation_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
-      for _, option in ipairs({"1", "2", "3", "4"}) do
-        if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
-          state.holyrics_lines_per_slide = tonumber(option)
-          reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
-        end
+  if state.automation_import_text == "" and model and model.lyrics.source then
+    state.automation_import_text = model.lyrics.source
+  elseif state.automation_import_text == "" and model then
+    local lines = {}
+    for _, line in ipairs(model.lyrics.lines) do table.insert(lines, line.text) end
+    state.automation_import_text = table.concat(lines, "\n")
+  end
+
+  local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
+  local column_w = (available_w - 8) / 2
+  reaper.ImGui_BeginChild(ctx, "##pure_lyrics", column_w, available_h, true)
+  reaper.ImGui_Text(ctx, "LETRA PURA")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Cole ou edite a letra aqui.")
+  reaper.ImGui_Separator(ctx)
+  local changed, text = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics_source", state.automation_import_text, -1, -76)
+  if changed then state.automation_import_text = text end
+  reaper.ImGui_Text(ctx, "Linhas por slide")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 60)
+  if reaper.ImGui_BeginCombo(ctx, "##automation_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
+    for _, option in ipairs({"1", "2", "3", "4"}) do
+      if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
+        state.holyrics_lines_per_slide = tonumber(option)
+        reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
       end
-      reaper.ImGui_EndCombo(ctx)
     end
-    if reaper.ImGui_Button(ctx, "GERAR LINHAS E SLIDES", 210, 30) then
+    reaper.ImGui_EndCombo(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "PROCESSAR LETRA", 160, 28) then
+    if model and #model.lyrics.lines > 0 then
+      reaper.ImGui_OpenPopup(ctx, "Confirmar nova letra")
+    else
       state.automation_model = AutomationModel.import_text(state.automation_import_text, state.holyrics_lines_per_slide)
       save_automation_model()
     end
-    return
-  end
-
-  reaper.ImGui_Text(ctx, "LINHAS — IDs permanentes")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Mover uma linha entre slides não altera seu ID.")
-  reaper.ImGui_Separator(ctx)
-  reaper.ImGui_BeginChild(ctx, "##automation_lines", 0, -46, true)
-  for _, line in ipairs(model.lyrics.lines) do
-    reaper.ImGui_PushID(ctx, line.id)
-    reaper.ImGui_TextColored(ctx, C.accent, line.displayId)
-    reaper.ImGui_SameLine(ctx, 54)
-    reaper.ImGui_SetNextItemWidth(ctx, -1)
-    local changed, text = reaper.ImGui_InputText(ctx, "##text", line.text)
-    if changed then
-      line.text = text
-      save_automation_model()
-    end
-    reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, -150)
-  local changed, text = reaper.ImGui_InputText(ctx, "##new_automation_line", state.automation_new_line)
-  if changed then state.automation_new_line = text end
+
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "+ LINHA", 130, 0) and state.automation_new_line:match("%S") then
-    AutomationModel.add_line(model, state.automation_new_line)
-    state.automation_new_line = ""
-    save_automation_model()
+  reaper.ImGui_BeginChild(ctx, "##generated_lines", 0, available_h, true)
+  reaper.ImGui_Text(ctx, "LINHAS GERADAS")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, "IDs permanentes")
+  reaper.ImGui_Separator(ctx)
+  if not model then
+    reaper.ImGui_TextDisabled(ctx, "Clique em PROCESSAR LETRA para gerar L1, L2, L3...")
+  else
+    for _, line in ipairs(model.lyrics.lines) do
+      reaper.ImGui_PushID(ctx, line.id)
+      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, line.displayId)
+      reaper.ImGui_SameLine(ctx, 54)
+      reaper.ImGui_SetNextItemWidth(ctx, -1)
+      local line_changed, line_text = reaper.ImGui_InputText(ctx, "##text", line.text)
+      if line_changed then
+        line.text = line_text
+        save_automation_model()
+      end
+      reaper.ImGui_PopID(ctx)
+    end
+  end
+  reaper.ImGui_EndChild(ctx)
+
+  if reaper.ImGui_BeginPopupModal(ctx, "Confirmar nova letra", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+    reaper.ImGui_TextWrapped(ctx, "Processar uma nova letra recriará linhas, slides e cues desta música. Continuar?")
+    if reaper.ImGui_Button(ctx, "PROCESSAR", 120, 0) then
+      state.automation_model = AutomationModel.import_text(state.automation_import_text, state.holyrics_lines_per_slide)
+      state.automation_selected_slide_id = nil
+      state.cue_engine = CueEngine.new()
+      save_automation_model()
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "CANCELAR", 120, 0) then reaper.ImGui_CloseCurrentPopup(ctx) end
+    reaper.ImGui_EndPopup(ctx)
   end
 end
 
@@ -2306,7 +2334,7 @@ local function render_automation_slides_editor(ctx)
   reaper.ImGui_BeginChild(ctx, "##automation_slides", 0, -40, true)
   for slide_index, slide in ipairs(model.slides) do
     reaper.ImGui_PushID(ctx, slide.id)
-    reaper.ImGui_TextColored(ctx, C.accent, slide.displayId)
+    reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, slide.displayId)
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_Text(ctx, "SLIDE " .. string.format("%02d", slide_index))
     reaper.ImGui_Separator(ctx)
@@ -2415,10 +2443,10 @@ local function render_automation_sync_editor(ctx)
   end
   for _, cue in ipairs(model.cues or {}) do
     local x = bar_x + (cue.time / project_length) * bar_w
-    reaper.ImGui_DrawList_AddLine(draw_list, x, bar_y + 4, x, bar_y + 56, C.accent, 2)
+    reaper.ImGui_DrawList_AddLine(draw_list, x, bar_y + 4, x, bar_y + 56, HOLYRICS_ACCENT, 2)
     local target = nil
     for _, slide in ipairs(model.slides) do if slide.id == cue.target then target = slide.displayId; break end end
-    reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 56, C.accent, target or "?")
+    reaper.ImGui_DrawList_AddText(draw_list, x + 3, bar_y + 56, HOLYRICS_ACCENT, target or "?")
   end
   reaper.ImGui_Dummy(ctx, bar_w, bar_h)
 
@@ -2431,7 +2459,7 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_PushID(ctx, cue.id)
     local slide_name = cue.target
     for _, slide in ipairs(model.slides) do if slide.id == cue.target then slide_name = slide.displayId; break end end
-    reaper.ImGui_TextColored(ctx, C.accent, cue.displayId)
+    reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, cue.displayId)
     reaper.ImGui_SameLine(ctx, 55)
     reaper.ImGui_Text(ctx, format_cue_time(cue.time))
     reaper.ImGui_SameLine(ctx, 155)
@@ -2444,7 +2472,7 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
-  reaper.ImGui_TextColored(ctx, C.accent, "SIMULAÇÃO")
+  reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SIMULAÇÃO")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, state.automation_simulation_log or "Aguardando playback...")
 end

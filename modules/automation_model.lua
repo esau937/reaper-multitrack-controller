@@ -88,6 +88,7 @@ function AutomationModel.import_text(text, lines_per_slide)
   local active_slide = nil
   local line_count = 0
   text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  model.lyrics.source = text
   for raw_line in (text .. "\n"):gmatch("(.-)\n") do
     local value = raw_line:match("^%s*(.-)%s*$")
     if value ~= "" then
