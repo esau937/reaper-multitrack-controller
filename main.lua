@@ -192,7 +192,9 @@ local state = {
   holyrics_editing_line = nil,
   holyrics_editing_text = "",
   holyrics_editing_focused = false,
-  holyrics_editor_view = "LEGADO",
+  holyrics_editor_view = "LETRA",
+  holyrics_window_w = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_w")) or 1400,
+  holyrics_window_h = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_h")) or 900,
   automation_model = nil,
   automation_import_text = "",
   automation_new_line = "",
@@ -2451,8 +2453,8 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   if not state.show_holyrics_modal then return end
   
   reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w / 2), win_y + (win_h / 2), reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
-  reaper.ImGui_SetNextWindowSize(ctx, 1000, 700, reaper.ImGui_Cond_Appearing())
-  reaper.ImGui_SetNextWindowSizeConstraints(ctx, 800, 600, 2000, 1500)
+  reaper.ImGui_SetNextWindowSize(ctx, state.holyrics_window_w, state.holyrics_window_h, reaper.ImGui_Cond_Appearing())
+  reaper.ImGui_SetNextWindowSizeConstraints(ctx, 960, 680, 2400, 1800)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowRounding(), 8.0)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), 0x000000FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBg(), 0x000000FF)
@@ -2462,8 +2464,15 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   if not open then state.show_holyrics_modal = false end
   
   if visible then
-    for _, view in ipairs({"LEGADO", "LETRA", "SLIDES", "SYNC"}) do
-      if view ~= "LEGADO" then reaper.ImGui_SameLine(ctx) end
+    local actual_w, actual_h = reaper.ImGui_GetWindowSize(ctx)
+    if actual_w ~= state.holyrics_window_w or actual_h ~= state.holyrics_window_h then
+      state.holyrics_window_w, state.holyrics_window_h = actual_w, actual_h
+      reaper.SetExtState("MultitrackController", "holyrics_window_w", tostring(actual_w), true)
+      reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
+    end
+
+    for index, view in ipairs({"LETRA", "SLIDES", "SYNC"}) do
+      if index > 1 then reaper.ImGui_SameLine(ctx) end
       if reaper.ImGui_Button(ctx, view, 90, 26) then state.holyrics_editor_view = view end
     end
     reaper.ImGui_Separator(ctx)
@@ -2478,6 +2487,11 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     elseif state.holyrics_editor_view == "SYNC" then
       render_automation_sync_editor(ctx)
     else
+      -- The retired editor is intentionally no longer exposed in the UI.
+      -- Fall back to the new lyric model if an old in-memory tab value remains.
+      state.holyrics_editor_view = "LETRA"
+      render_automation_lyrics_editor(ctx)
+      --[[
     local proj_regions = {}
     local idx = 0
     while true do
@@ -2795,7 +2809,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     reaper.ImGui_EndChild(ctx)
     reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_EndGroup(ctx)
-    end -- LEGADO editor
+    ]] -- retired legacy editor
     reaper.ImGui_End(ctx)
   end
   reaper.ImGui_PopStyleColor(ctx, 3)
