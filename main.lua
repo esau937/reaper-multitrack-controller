@@ -2471,6 +2471,14 @@ local function render_automation_sync_editor(ctx)
   local playhead_x = bar_x + (timeline_position / project_length) * bar_w
   reaper.ImGui_DrawList_AddLine(draw_list, playhead_x, bar_y, playhead_x, bar_y + 66, 0xFFFFFFFF, 2)
   reaper.ImGui_Dummy(ctx, bar_w, bar_h)
+  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDown(ctx, 0) then
+    local mouse_x = reaper.ImGui_GetMousePos(ctx)
+    local ratio = math.max(0, math.min(1, (mouse_x - bar_x) / bar_w))
+    reaper.SetEditCurPos(ratio * project_length, true, is_playing)
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Clique ou arraste para mover a posição na timeline.")
+  end
 
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_BeginChild(ctx, "##cue_list", 0, -62, true)
