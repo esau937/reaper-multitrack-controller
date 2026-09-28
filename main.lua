@@ -3420,6 +3420,7 @@ end
 local function loop()
   -- ─── Lógica do HOLD (Auto-Avanço de Aba) ───
   local current_play_state = reaper.GetPlayState() & 1
+  local playback_started = current_play_state == 1 and state._last_play_state ~= 1
   if current_play_state == 1 then
     state._last_play_pos = reaper.GetPlayPosition()
     
@@ -3460,12 +3461,10 @@ local function loop()
     )
     -- Ao apertar Play no meio da música, abre a apresentação já na L correta.
     -- Os próximos cues apenas avançam para a próxima linha, sem reabrir a tela.
-    if cue_state == "started" and state.code_send_mode ~= "TCP MIDI" then
+    if (playback_started or cue_state == "started") and state.code_send_mode ~= "TCP MIDI" then
       local current_cue = active_line_cue(state.automation_model, automation_position)
       local ok, message = open_holyrics_presentation(state.automation_model, current_cue and current_cue.target or nil)
       state.holyrics_remote_status = { ok = ok, message = message }
-    elseif cue_state == "rewind" then
-      state.holyrics_remote_open = false
     end
   end
 
