@@ -198,6 +198,7 @@ local state = {
   code_tcp_host = reaper.GetExtState("MultitrackController", "code_tcp_host"),
   code_tcp_port = reaper.GetExtState("MultitrackController", "code_tcp_port"),
   code_send_mode = reaper.GetExtState("MultitrackController", "code_send_mode") ~= "" and reaper.GetExtState("MultitrackController", "code_send_mode") or "API + TCP MIDI",
+  code_api_status = nil,
   holyrics_text = "",
   holyrics_parsed = {},
   holyrics_slides = {},
@@ -2540,6 +2541,22 @@ local function render_visual_click(ctx, position, is_playing)
   if is_playing then reaper.ImGui_PopStyleColor(ctx, 4) else pop_btn_style() end
 end
 
+local function test_route_api(url)
+  url = (url or ""):match("^%s*(.-)%s*$")
+  if not url:match("^https?://[%w%._%-]+:%d+/?$") then
+    return nil, "Informe um endereço no formato http://IP:PORTA."
+  end
+  if not reaper.ExecProcess then
+    return nil, "Esta versão do REAPER não possui o teste de conexão."
+  end
+  local ok, output = pcall(reaper.ExecProcess,
+    'curl.exe -s -o NUL -w "%{http_code}" --connect-timeout 2 "' .. url .. '"', 3500)
+  if not ok or not output then return nil, "Não foi possível executar o teste de conexão." end
+  local code = tostring(output):match("(%d%d%d)")
+  if code and code ~= "000" then return true, "Conectado ao API Server (HTTP " .. code .. ")." end
+  return nil, "Não foi possível alcançar o API Server. Verifique IP, porta e Firewall."
+end
+
 local function render_route_editor(ctx)
   reaper.ImGui_Text(ctx, "ROUTE")
   reaper.ImGui_SameLine(ctx)
@@ -2552,7 +2569,16 @@ local function render_route_editor(ctx)
   local api_changed, api_server = reaper.ImGui_InputText(ctx, "##code_api_server", state.code_api_server)
   if api_changed then
     state.code_api_server = api_server
+    state.code_api_status = nil
     reaper.SetExtState("MultitrackController", "code_api_server", api_server, true)
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "TESTAR API", 110, 0) then
+    local ok, message = test_route_api(state.code_api_server)
+    state.code_api_status = { ok = ok, message = message }
+  end
+  if state.code_api_status then
+    reaper.ImGui_TextColored(ctx, state.code_api_status.ok and HOLYRICS_MAPPED_GREEN or C.red, state.code_api_status.message)
   end
 
   reaper.ImGui_Dummy(ctx, 0, 16)
