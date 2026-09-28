@@ -2470,8 +2470,9 @@ local function render_automation_sync_editor(ctx)
   end
   local playhead_x = bar_x + (timeline_position / project_length) * bar_w
   reaper.ImGui_DrawList_AddLine(draw_list, playhead_x, bar_y, playhead_x, bar_y + 66, 0xFFFFFFFF, 2)
-  reaper.ImGui_Dummy(ctx, bar_w, bar_h)
-  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDown(ctx, 0) then
+  reaper.ImGui_SetCursorScreenPos(ctx, bar_x, bar_y)
+  reaper.ImGui_InvisibleButton(ctx, "##timeline_scrub", bar_w, bar_h)
+  if reaper.ImGui_IsItemActive(ctx) and reaper.ImGui_IsMouseDown(ctx, 0) then
     local mouse_x = reaper.ImGui_GetMousePos(ctx)
     local ratio = math.max(0, math.min(1, (mouse_x - bar_x) / bar_w))
     reaper.SetEditCurPos(ratio * project_length, true, is_playing)
