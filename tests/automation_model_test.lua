@@ -14,8 +14,10 @@ local line_three = model.lyrics.lines[3]
 local title_line = assert(Model.set_title_line(model, "Artista", "Minha Música"))
 assert_equal(title_line.displayId, "LT", "title line uses the LT display ID")
 assert_equal(model.lyrics.lines[1].id, title_line.id, "title line is always first")
+assert_equal(model.slides[1].id, "slide-title", "LT has its own title slide")
+assert_equal(#model.slides[1].lineIds, 1, "the title slide contains only LT")
 
-local first_slide, second_slide = model.slides[1], model.slides[2]
+local first_slide, second_slide = model.slides[2], model.slides[3]
 assert(Model.move_line(model, line_three.id, first_slide.id))
 assert_equal(line_three.id, "line-3", "moving a line does not change its technical ID")
 assert_equal(line_three.displayId, "L3", "moving a line does not change its display ID")
@@ -40,7 +42,7 @@ assert(Model.move_cue(model, line_cue.id, 44.25))
 assert_equal(line_cue.time, 44.25, "a cue can be repositioned on the timeline")
 
 assert(Model.reflow_slides(model, 1))
-assert_equal(#model.slides, 4, "reflow creates additional slides when required")
+assert_equal(#model.slides, 4, "reflow preserves the title slide and creates lyric slides")
 assert_equal(model.slides[4].lineIds[1], line_three.id, "reflow preserves line identity")
 
 model.cues = nil -- Simulates a project saved before the cue phase.

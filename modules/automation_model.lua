@@ -41,6 +41,47 @@ local function remove_line_from_slides(model, line_id)
   end
 end
 
+local function title_line_of(model)
+  for _, line in ipairs(model.lyrics.lines or {}) do
+    if line.isTitle then return line end
+  end
+  return nil
+end
+
+-- LT is a presentation card of its own, never part of a lyric slide.  The
+-- special slide ID prevents existing S1, S2... identifiers from changing when
+-- an older project is upgraded.
+local function ensure_title_slide(model, title_line)
+  local title_slide = nil
+  local changed = false
+  for _, slide in ipairs(model.slides) do
+    if slide.id == "slide-title" then title_slide = slide; break end
+  end
+  if not title_slide then changed = true end
+  for _, slide in ipairs(model.slides) do
+    for _, line_id in ipairs(slide.lineIds) do
+      if line_id == title_line.id and (slide ~= title_slide or #slide.lineIds ~= 1) then changed = true end
+    end
+  end
+  remove_line_from_slides(model, title_line.id)
+  if not title_slide then
+    title_slide = { id = "slide-title", displayId = "ST", isTitle = true, lineIds = {} }
+    table.insert(model.slides, 1, title_slide)
+  else
+    for index, slide in ipairs(model.slides) do
+      if slide == title_slide and index ~= 1 then
+        table.remove(model.slides, index)
+        table.insert(model.slides, 1, title_slide)
+        changed = true
+        break
+      end
+    end
+  end
+  title_slide.isTitle = true
+  title_slide.lineIds = { title_line.id }
+  return title_slide, changed
+end
+
 function AutomationModel.new()
   return {
     schemaVersion = 1,
@@ -95,15 +136,20 @@ function AutomationModel.set_title_line(model, artist, title)
   if not title_line then
     title_line = { id = "line-title", displayId = "LT", text = text, isTitle = true }
     table.insert(model.lyrics.lines, 1, title_line)
-    local first_slide = model.slides[1] or AutomationModel.add_slide(model)
-    remove_line_from_slides(model, title_line.id)
-    table.insert(first_slide.lineIds, 1, title_line.id)
   else
     title_line.text = text
   end
+  ensure_title_slide(model, title_line)
   model.lyrics.titleArtist = artist
   model.lyrics.titleSong = title
   return title_line
+end
+
+function AutomationModel.normalize_title_slide(model)
+  local title_line = title_line_of(model)
+  if not title_line then return false end
+  local _, changed = ensure_title_slide(model, title_line)
+  return changed
 end
 
 function AutomationModel.import_text(text, lines_per_slide)
@@ -155,22 +201,27 @@ end
 function AutomationModel.reflow_slides(model, lines_per_slide)
   lines_per_slide = math.max(1, math.min(tonumber(lines_per_slide) or 4, 4))
   local ordered_lines, seen = {}, {}
+  local title_line = title_line_of(model)
+  if title_line then ensure_title_slide(model, title_line) end
   for _, slide in ipairs(model.slides) do
     for _, line_id in ipairs(slide.lineIds) do
-      if not seen[line_id] then
+      if line_id ~= (title_line and title_line.id) and not seen[line_id] then
         table.insert(ordered_lines, line_id)
         seen[line_id] = true
       end
     end
   end
   for _, line in ipairs(model.lyrics.lines) do
-    if not seen[line.id] then table.insert(ordered_lines, line.id) end
+    if line.id ~= (title_line and title_line.id) and not seen[line.id] then table.insert(ordered_lines, line.id) end
   end
-  local required = math.ceil(#ordered_lines / lines_per_slide)
+  local title_offset = title_line and 1 or 0
+  local required = math.ceil(#ordered_lines / lines_per_slide) + title_offset
   while #model.slides < required do AutomationModel.add_slide(model) end
-  for _, slide in ipairs(model.slides) do slide.lineIds = {} end
+  for _, slide in ipairs(model.slides) do
+    if not slide.isTitle then slide.lineIds = {} end
+  end
   for index, line_id in ipairs(ordered_lines) do
-    table.insert(model.slides[math.ceil(index / lines_per_slide)].lineIds, line_id)
+    table.insert(model.slides[math.ceil(index / lines_per_slide) + title_offset].lineIds, line_id)
   end
   return true
 end

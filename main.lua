@@ -247,6 +247,9 @@ local saved_automation, automation_load_error = AutomationStore.load(0)
 state.automation_model = saved_automation
 state.automation_error = automation_load_error
 if saved_automation then
+  -- Upgrade older projects where LT was placed in the first lyric slide.
+  local title_slide_upgraded = AutomationModel.normalize_title_slide(saved_automation)
+  if title_slide_upgraded then AutomationStore.save(saved_automation, 0) end
   local export_path, export_warning = AutomationStore.export_sidecar(saved_automation, 0)
   state.automation_export_path = export_path
   state.automation_export_warning = export_warning
