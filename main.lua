@@ -203,6 +203,11 @@ local state = {
   holyrics_remote_open = false,
   holyrics_remote_model = nil,
   holyrics_remote_status = nil,
+  cover_path = "",
+  cover_image = nil,
+  cover_image_path = nil,
+  cover_image_w = 0,
+  cover_image_h = 0,
   holyrics_text = "",
   holyrics_parsed = {},
   holyrics_slides = {},
@@ -566,6 +571,65 @@ end
 
 -- ─── State update (runs at reduced rate) ─────────────────────────────────────
 
+local COVER_EXTENSIONS = { png = true, jpg = true, jpeg = true, bmp = true }
+
+local function project_folder(project_path)
+  return (project_path or ""):match("^(.*)[/\\]")
+end
+
+local function find_project_cover(folder)
+  if not folder or folder == "" or not reaper.EnumerateFiles then return nil end
+  local candidates = {}
+  local index = 0
+  while true do
+    local filename = reaper.EnumerateFiles(folder, index)
+    if not filename then break end
+    index = index + 1
+    local extension = filename:match("%.([^.]+)$")
+    if extension and COVER_EXTENSIONS[extension:lower()] then
+      local lower = filename:lower()
+      local score = 0
+      if lower:match("^capa") or lower:match("^cover") or lower:match("^folder") then score = score + 100 end
+      if lower:find("capa", 1, true) or lower:find("cover", 1, true) then score = score + 50 end
+      if lower:find("artwork", 1, true) or lower:find("front", 1, true) then score = score + 20 end
+      candidates[#candidates + 1] = { path = folder .. "/" .. filename, score = score, name = lower }
+    end
+  end
+  table.sort(candidates, function(a, b)
+    if a.score ~= b.score then return a.score > b.score end
+    return a.name < b.name
+  end)
+  return candidates[1] and candidates[1].path or nil
+end
+
+local function load_cover_image(path)
+  if path == state.cover_image_path then return end
+  state.cover_image_path, state.cover_image = path, nil
+  state.cover_image_w, state.cover_image_h = 0, 0
+  if not path or path == "" or not reaper.ImGui_CreateImage then return end
+  local ok, image = pcall(reaper.ImGui_CreateImage, path)
+  if not ok or not image then return end
+  reaper.ImGui_Attach(ctx, image)
+  local width, height = reaper.ImGui_Image_GetSize(image)
+  state.cover_image, state.cover_image_w, state.cover_image_h = image, width or 0, height or 0
+end
+
+local function refresh_project_cover(proj, project_path)
+  local _, selected = reaper.GetProjExtState(proj, "MultitrackController", "cover_path")
+  local path = selected ~= "" and selected or find_project_cover(project_folder(project_path))
+  state.cover_path = path or ""
+  load_cover_image(state.cover_path)
+end
+
+local function choose_project_cover()
+  local ok, path = reaper.GetUserFileNameForRead(state.cover_path or "", "Selecionar capa do projeto", "png,jpg,jpeg,bmp")
+  if not ok then return end
+  local proj = reaper.EnumProjects(-1)
+  reaper.SetProjExtState(proj, "MultitrackController", "cover_path", path)
+  state.cover_path = path
+  load_cover_image(path)
+end
+
 local function update_state()
   local now = reaper.time_precise()
   if now - state._last_check < 0.4 then return end
@@ -591,6 +655,7 @@ local function update_state()
     end
     
     state.sections = Sections.get_from_project(proj)
+    refresh_project_cover(proj, proj_path)
   end
 end
 
@@ -1896,6 +1961,19 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   -- ─── ESQUERDA: Info (Título) ───
   local x = win_x + 10
   local sname = state.current_proj_name:gsub("%.[Rr][Pp][Pp]$","")
+  local cover_size = 38
+
+  -- Capa detectada na pasta do projeto. Clique em CAPA para trocar a imagem
+  -- quando o arquivo baixado tiver mais de uma figura.
+  if state.cover_image then
+    reaper.ImGui_SetCursorScreenPos(ctx, x, y)
+    reaper.ImGui_Image(ctx, state.cover_image, cover_size, cover_size)
+  else
+    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
+    reaper.ImGui_DrawList_AddRect(draw_list, x, y, x + cover_size, y + cover_size, C.border, 4.0, 0, 1.0)
+    reaper.ImGui_DrawList_AddText(draw_list, x + 7, y + 12, C.text_dim, "CAPA")
+  end
+  x = x + cover_size + 8
   
   -- Título centralizado verticalmente (ajustado para a fonte maior)
   local title_y_offset = (top_h / 2) - 9
@@ -1906,6 +1984,12 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   reaper.ImGui_Text(ctx, sname)
   reaper.ImGui_PopFont(ctx)
   reaper.ImGui_PopStyleColor(ctx)
+
+  local title_w = reaper.ImGui_CalcTextSize(ctx, sname)
+  reaper.ImGui_SetCursorScreenPos(ctx, x + title_w + 10, y + 6)
+  push_btn_style()
+  if reaper.ImGui_Button(ctx, "CAPA", 46, bh - 12) then choose_project_cover() end
+  pop_btn_style()
 
   -- ─── CENTRO: HOLD + LOOP + Transporte + PAD + CLICK ───
   local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
