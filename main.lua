@@ -66,6 +66,7 @@ local KeyDetect  = require("keydetect")
 local Sections   = require("sections")
 local Pads       = require("pads")
 local Repertoire = require("repertoire")
+local Chords = require("chords")
 
 Repertoire.init(SCRIPT_PATH)
 
@@ -257,6 +258,7 @@ local function restore_all_pitch()
 end
 
 reaper.atexit(function()
+  Pads.stop_all()
   restore_ducking()
   restore_all_pitch()
 end)
@@ -995,6 +997,20 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   local row1_y = marker_y - (marker_h + gap) * 2
   local row2_y = marker_y - marker_h - gap
 
+  -- Chords sit above the right-hand button grid, in the unused header space.
+  local pitch_state = state.pitch_projects[tostring(proj)]
+  local chord, next_chord, automatic = Chords.display(json, pitch_state and pitch_state.offset or 0)
+  local chord_y = row1_y - 48
+  reaper.ImGui_DrawList_PushClipRect(draw_list, marker_x, chord_y, marker_x + combined_w, row1_y - 2, true)
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y, C.text_dim, automatic and (Chords.is_simplified() and "AUTO · SIMPLES" or "ACORDE · AUTO") or "ACORDE")
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y, C.text_dim, "PRÓXIMO")
+  push_font_compat(font_large, 18)
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y + 19, C.accent, chord)
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y + 19, C.text, next_chord)
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_DrawList_PopClipRect(draw_list)
+
+
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 8.0)
 
   -- ================== COLUNA 1 ==================
@@ -1173,6 +1189,10 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   reaper.ImGui_SetNextWindowSizeConstraints(ctx, 180, 0, 9999, 9999)
   
   if reaper.ImGui_BeginPopup(ctx, "OpcoesPopup") then
+    if reaper.ImGui_Selectable(ctx, "Acordes simplificados", Chords.is_simplified(), 0, 0, 22) then
+      Chords.toggle_mode()
+    end
+
     if reaper.ImGui_Selectable(ctx, "Pasta de Pads", false, 0, 0, 22) then
       if reaper.JS_Dialog_BrowseForFolder then
         local current_folder = reaper.GetExtState("MultitrackController", "pads_folder")

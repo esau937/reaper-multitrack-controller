@@ -16,8 +16,10 @@ KeyDetect.CHROMATIC = {"C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"}
 -- Full list (minor variants tried first to avoid partial matches)
 -- e.g. "Am" must be tried before "A"
 local ORDERED_KEYS = {
+  "C#m","D#m","F#m","G#m","A#m",
   "Dbm","Ebm","Gbm","Abm","Bbm",
   "Cm","Dm","Em","Fm","Gm","Am","Bm",
+  "C#","D#","F#","G#","A#",
   "Db","Eb","Gb","Ab","Bb",
   "C","D","E","F","G","A","B",
 }
@@ -64,7 +66,9 @@ end
 -- @return  one of the 12 chromatic keys or nil
 function KeyDetect.get_root(key)
   if not key then return nil end
-  return key:gsub("m$", "")
+  local root = key:gsub("m$", "")
+  local enharmonic = {["C#"]="Db", ["D#"]="Eb", ["F#"]="Gb", ["G#"]="Ab", ["A#"]="Bb"}
+  return enharmonic[root] or root
 end
 
 --- Check if a chromatic button label is the active key.

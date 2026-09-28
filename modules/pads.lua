@@ -1,6 +1,6 @@
 -- modules/pads.lua
 -- Manages PAD and PAD INTRO buttons.
--- MP3 files are played via reaper.PlayPreviewEx() (native, low latency).
+-- Audio files are played using the SWS CF_Preview API.
 -- Right-click opens a file dialog to select the MP3.
 
 local Pads = {}
@@ -101,64 +101,129 @@ function Pads.resolve_file(pad, current_key)
   return pad.file
 end
 
---- Start playing a pad's MP3 file.
--- @param pad  { name, file, playing, loop }
-function Pads.play(pad, current_key)
-  local file_to_play = Pads.resolve_file(pad, current_key)
-  if not file_to_play or file_to_play == "" then
-    reaper.ShowMessageBox(
-      "Nenhum arquivo encontrado para o tom \"" .. (current_key or "N/A") .. "\" na pasta de pads.\n\nOu configure um arquivo manualmente com o botao direito.",
-      "Multitrack Controller", 0)
-    return
-  end
-
-  if pad.playing and _preview_handles[pad.name] then
-    Pads.stop(pad)
-    return
-  end
-
-  local src = reaper.PCM_Source_CreateFromFile(file_to_play)
-  if not src then
-    reaper.ShowMessageBox("Erro ao carregar: \"" .. file_to_play .. "\"", "Multitrack Controller", 0)
-    return
-  end
-
-  local handle = nil
-  if reaper.PlayPreviewEx then
-    handle = reaper.PlayPreviewEx(src, pad.loop and 1 or 0, 1.0)
-  elseif reaper.Xen_StartSourcePreview then
-    reaper.Xen_StartSourcePreview(src, 1.0, pad.loop == true)
-    handle = { type = "xen", src = src }
-  else
-    reaper.ShowMessageBox("Sua vers�o do REAPER n�o suporta a fun��o nativa de Pads (PlayPreviewEx). Atualize o REAPER para a vers�o 7.07+ ou instale a extens�o SWS.", "Multitrack Controller", 0)
-    return
-  end
-
-  _preview_handles[pad.name] = handle
-  pad.playing = true
+-- Playback uses the SWS CF preview API. Each pad owns its preview handle.
+local function pad_error(message)
+  reaper.ShowMessageBox(message, "Multitrack Controller - PAD", 0)
 end
 
---- Stop a playing pad.
 function Pads.stop(pad)
-  local handle = _preview_handles[pad.name]
+  local handle = _preview_handles[pad]
   if handle then
-    if type(handle) == "table" and handle.type == "xen" then
-      if reaper.Xen_StopSourcePreview then reaper.Xen_StopSourcePreview(handle.src) end
-    else
-      if reaper.StopPreview then reaper.StopPreview(handle) end
+    local ok, stopped = pcall(reaper.CF_Preview_Stop, handle)
+    if not ok then
+      pad_error("Erro ao parar o pad: " .. tostring(stopped))
+      return false
     end
-    _preview_handles[pad.name] = nil
+    if not stopped then
+      -- A completed preview is automatically destroyed by SWS.
+      local checked, valid = pcall(reaper.CF_Preview_GetValue, handle, "D_POSITION")
+      if not checked or valid then
+        pad_error("A parada do pad nao foi confirmada. Tente novamente.")
+        return false
+      end
+    end
+    _preview_handles[pad] = nil
   end
   pad.playing = false
+  return true
 end
 
---- Toggle play/stop for a pad.
-function Pads.toggle(pad, current_key)
-  if pad.playing then
-    Pads.stop(pad)
-  else
-    Pads.play(pad, current_key)
+function Pads.stop_all()
+  local pending = {}
+  for pad in pairs(_preview_handles) do pending[#pending + 1] = pad end
+  for _, pad in ipairs(pending) do Pads.stop(pad) end
+end
+
+-- Persistent ownership is stored on the track, not inferred from its name.
+-- The panel currently has one PAD button, with stable identity "main".
+local function ensure_pad_track(pad)
+  local project = reaper.EnumProjects(-1)
+  local owner = pad.id or "main"
+  local tag = "P_EXT:MultitrackController_PAD"
+  for i = 0, reaper.CountTracks(project) - 1 do
+    local track = reaper.GetTrack(project, i)
+    local _, value = reaper.GetSetMediaTrackInfo_String(track, tag, "", false)
+    if value == owner then
+      local _, name = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
+      if name == "PAD" then
+        reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "PAD CONTROLLER", true)
+        reaper.TrackList_AdjustWindows(false)
+        reaper.UpdateArrange()
+      end
+      reaper.SetMediaTrackInfo_Value(track, "B_MUTE", 0)
+      return project, track
+    end
   end
+  -- Insert at the top to avoid accidentally nesting inside an existing folder.
+  reaper.Undo_BeginBlock2(project)
+  reaper.InsertTrackAtIndex(0, true)
+  local track = reaper.GetTrack(project, 0)
+  if track then
+    reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "PAD CONTROLLER", true)
+    reaper.GetSetMediaTrackInfo_String(track, tag, owner, true)
+    reaper.SetMediaTrackInfo_Value(track, "B_MUTE", 0)
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+  end
+  reaper.Undo_EndBlock2(project, "Multitrack Controller: criar faixa exclusiva do PAD", -1)
+  return project, track
+end
+
+function Pads.play(pad, current_key)
+  if _preview_handles[pad] then return Pads.stop(pad) end
+  for _, api in ipairs({"CF_CreatePreview", "CF_Preview_SetValue", "CF_Preview_GetValue", "CF_Preview_Play", "CF_Preview_Stop", "CF_Preview_SetOutputTrack"}) do
+    if not reaper[api] then
+      pad_error("O PAD requer a extensao SWS com a API CF_Preview. Atualize a SWS e reinicie o REAPER.")
+      return false
+    end
+  end
+  local file = Pads.resolve_file(pad, current_key)
+  if not file or file == "" then
+    pad_error("Nenhum arquivo de pad encontrado para o tom " .. (current_key or "N/A"))
+    return false
+  end
+  local src = reaper.PCM_Source_CreateFromFile(file)
+  if not src then
+    pad_error("Erro ao carregar: " .. file)
+    return false
+  end
+  local project, track = ensure_pad_track(pad)
+  if not track then
+    reaper.PCM_Source_Destroy(src)
+    pad_error("Nao foi possivel criar a faixa do PAD.")
+    return false
+  end
+  -- CF_CreatePreview duplicates the source; release our original source.
+  local created, handle = pcall(reaper.CF_CreatePreview, src)
+  reaper.PCM_Source_Destroy(src)
+  if not created or not handle then
+    pad_error("Nao foi possivel criar a reproducao do pad.")
+    return false
+  end
+  local ok, started = pcall(function()
+    if not reaper.CF_Preview_SetValue(handle, "B_LOOP", pad.loop and 1 or 0) then return false end
+    if not reaper.CF_Preview_SetValue(handle, "D_VOLUME", 1.0) then return false end
+    -- Fade the source, leaving the track fader, FX and routing untouched.
+    if not reaper.CF_Preview_SetValue(handle, "D_FADEINLEN", 1.0) then return false end
+    if not reaper.CF_Preview_SetValue(handle, "D_FADEOUTLEN", 1.0) then return false end
+    if not reaper.CF_Preview_SetOutputTrack(handle, project, track) then return false end
+    return reaper.CF_Preview_Play(handle)
+  end)
+  if not ok or not started then
+    pcall(reaper.CF_Preview_Stop, handle)
+    pad_error("Nao foi possivel iniciar o pad: " .. tostring(started))
+    return false
+  end
+  _preview_handles[pad] = handle
+  pad.playing = true
+  return true
+end
+
+function Pads.toggle(pad, current_key)
+  if _preview_handles[pad] or pad.playing then
+    return Pads.stop(pad)
+  end
+  return Pads.play(pad, current_key)
 end
 
 -- ─── Configuration ───────────────────────────────────────────────────────────
