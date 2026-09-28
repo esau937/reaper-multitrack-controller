@@ -2464,8 +2464,8 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_Text(ctx, format_cue_time(cue.time))
     reaper.ImGui_SameLine(ctx, 155)
     reaper.ImGui_Text(ctx, cue.action .. " - " .. slide_name)
-    reaper.ImGui_SameLine(ctx, -40)
-    if reaper.ImGui_Button(ctx, "X", 24, 0) then
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "REMOVER", 76, 0) then
       AutomationModel.remove_cue(model, cue.id)
       save_automation_model()
     end
