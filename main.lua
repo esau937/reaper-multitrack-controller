@@ -3196,6 +3196,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
+    local header_y = reaper.ImGui_GetCursorPosY(ctx)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 7.0)
     if reaper.ImGui_Button(ctx, "##holyrics_home", 34, 26) then
       state.holyrics_editor_view = "SYNC"
@@ -3220,7 +3221,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     -- disputar espaço com o mapa que é usado no dia a dia.
     local current_header_x = reaper.ImGui_GetCursorPosX(ctx)
     local header_width = current_header_x + reaper.ImGui_GetContentRegionAvail(ctx)
-    reaper.ImGui_SetCursorPosX(ctx, math.max(0, header_width - 226))
+    reaper.ImGui_SetCursorPos(ctx, math.max(0, header_width - 226), header_y)
     if reaper.ImGui_Button(ctx, "ROUTE", 90, 26) then
       state.holyrics_editor_view = state.holyrics_editor_view == "ROUTE" and "SYNC" or "ROUTE"
     end
