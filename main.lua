@@ -2769,19 +2769,20 @@ local function render_automation_sync_editor(ctx)
     -- Same black lyric workspace as a mapped song.  The only empty-state
     -- affordance is a transparent paste target; metadata can be corrected by
     -- clicking LT after the lines are created.
-    reaper.ImGui_TextColored(ctx, C.text_dim, "Clique aqui, cole a letra e confirme para criar as linhas.")
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Clique aqui e cole a letra.")
+    reaper.ImGui_SameLine(ctx)
+    local create_lines = reaper.ImGui_Button(ctx, "CRIAR LINHAS", 120, 24)
     reaper.ImGui_SetNextItemWidth(ctx, -1)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x00000000)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x00000000)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x00000000)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 0)
-    local lyric_height = math.max(120, details_h - 62)
+    local lyric_height = math.max(120, details_h - 42)
     local lyric_changed, lyrics = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics", state.automation_import_text or "", -1, lyric_height)
     if lyric_changed then state.automation_import_text = lyrics end
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleColor(ctx, 3)
-    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) - 34)
-    if reaper.ImGui_Button(ctx, "CRIAR LINHAS", 120, 28) then
+    if create_lines then
       local _, project_name = reaper.GetProjectName(0, "")
       project_name = (project_name or ""):gsub("%.rpp$", "")
       local song = (state.automation_title_song or project_name):match("^%s*(.-)%s*$")
