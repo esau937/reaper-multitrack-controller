@@ -3201,9 +3201,12 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
-    for index, view in ipairs({"SYNC", "ROUTE"}) do
-      if index > 1 then reaper.ImGui_SameLine(ctx) end
-      if reaper.ImGui_Button(ctx, view, 90, 26) then state.holyrics_editor_view = view end
+    -- SYNC é a própria tela inicial. As únicas ações ficam à direita para não
+    -- disputar espaço com o mapa que é usado no dia a dia.
+    local header_width = reaper.ImGui_GetContentRegionAvail(ctx)
+    reaper.ImGui_SetCursorPosX(ctx, math.max(0, header_width - 226))
+    if reaper.ImGui_Button(ctx, "ROUTE", 90, 26) then
+      state.holyrics_editor_view = state.holyrics_editor_view == "ROUTE" and "SYNC" or "ROUTE"
     end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "SALVAR MAPA", 128, 26) then
