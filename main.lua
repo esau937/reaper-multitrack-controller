@@ -2712,12 +2712,14 @@ local function render_new_automation_setup(ctx)
   reaper.ImGui_BeginChild(ctx, "##new_lyrics", lyric_panel_w, details_h, false)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
   reaper.ImGui_Dummy(ctx, 0, 6)
-  -- Same visual surface as the mapped lyric list: inputs stay in place with
-  -- no blue cards or frames, only a caret while text is being entered.
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x00000000)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x00000000)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x00000000)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 0)
+  -- Keep entry zones visibly editable without the old bright-blue cards.
+  -- A subtle border gives the user a reliable target for click, Ctrl+V and
+  -- typing on a brand-new song.
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x141A22FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x1E293BFF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x1E293BFF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), 0x3A4A60FF)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Cantor")
   reaper.ImGui_SetNextItemWidth(ctx, -1)
   local artist_changed, artist = reaper.ImGui_InputText(ctx, "##new_automation_artist", state.automation_title_artist or "")
@@ -2726,13 +2728,13 @@ local function render_new_automation_setup(ctx)
   reaper.ImGui_SetNextItemWidth(ctx, -1)
   local title_changed, title = reaper.ImGui_InputText(ctx, "##new_automation_title", state.automation_title_song or "")
   if title_changed then state.automation_title_song = title end
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Letra")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Letra — clique no quadro abaixo e cole ou escreva")
   reaper.ImGui_SetNextItemWidth(ctx, -1)
   local lyric_height = math.max(120, details_h - 128)
   local lyric_changed, lyrics = reaper.ImGui_InputTextMultiline(ctx, "##new_automation_lyrics", state.automation_import_text or "", -1, lyric_height)
   if lyric_changed then state.automation_import_text = lyrics end
   reaper.ImGui_PopStyleVar(ctx)
-  reaper.ImGui_PopStyleColor(ctx, 3)
+  reaper.ImGui_PopStyleColor(ctx, 4)
   reaper.ImGui_Dummy(ctx, 0, 8)
   if reaper.ImGui_Button(ctx, "GERAR MAPA", 120, 28) then
     local song = (state.automation_title_song or ""):match("^%s*(.-)%s*$")
