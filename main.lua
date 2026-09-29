@@ -2671,7 +2671,13 @@ local function render_automation_sync_editor(ctx)
   local model = state.automation_model
   -- SYNC has one workspace only. A new song uses a temporary empty model in
   -- this same renderer; it never switches to a separate setup screen.
-  local is_new_map = not model or #(model.lyrics.lines or {}) == 0
+  local generated_line_count = 0
+  if model then
+    for _, line in ipairs(model.lyrics.lines or {}) do
+      if not line.isTitle then generated_line_count = generated_line_count + 1 end
+    end
+  end
+  local is_new_map = generated_line_count == 0
   if not model then model = AutomationModel.new() end
   local regions = Sections.get_from_project(0)
   local is_playing = (reaper.GetPlayState() & 1) == 1
@@ -2785,6 +2791,24 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, is_new_map and "Cole a letra abaixo." or "1 clique mapeia · 2 cliques editam")
+  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 248, lyric_header_y)
+  reaper.ImGui_SetNextItemWidth(ctx, 120)
+  if reaper.ImGui_BeginCombo(ctx, "##generated_lines", "GERADAS " .. tostring(generated_line_count)) then
+    reaper.ImGui_TextDisabled(ctx, tostring(generated_line_count) .. " linhas geradas")
+    if generated_line_count > 0 then
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_Button(ctx, "EXCLUIR TODAS", 112, 24) then
+        local removed = AutomationModel.clear_generated_lines(model)
+        state.automation_import_text = ""
+        state.inline_lyric_edit_id = nil
+        state.inline_slide_edit_id = nil
+        state.pending_lyric_map = nil
+        state.automation_error = removed > 0 and nil or "Não há linhas geradas para excluir."
+        save_automation_model()
+      end
+    end
+    reaper.ImGui_EndCombo(ctx)
+  end
   reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 120, lyric_header_y)
   local generate_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
   reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x, lyric_header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
@@ -2806,12 +2830,17 @@ local function render_automation_sync_editor(ctx)
     if generate_lines then
       local _, project_name = reaper.GetProjectName(0, "")
       project_name = (project_name or ""):gsub("%.rpp$", "")
-      local song = (state.automation_title_song or project_name):match("^%s*(.-)%s*$")
+      local song = (state.automation_title_song or ""):match("^%s*(.-)%s*$")
       local singer = (state.automation_title_artist or ""):match("^%s*(.-)%s*$")
       local source = (state.automation_import_text or ""):match("^%s*(.-)%s*$")
       if source == "" then
         state.automation_error = "Cole ou escreva ao menos uma linha da letra."
       else
+        if song == "" and model and model.lyrics then
+          song = (model.lyrics.titleSong or ""):match("^%s*(.-)%s*$")
+          singer = singer ~= "" and singer or (model.lyrics.titleArtist or ""):match("^%s*(.-)%s*$")
+        end
+        if song == "" then song = project_name end
         if singer == "" and song == "" then song = "Nova música" end
         local new_model = AutomationModel.import_text(source, state.holyrics_lines_per_slide)
         local title_line, title_error = AutomationModel.set_title_line(new_model, singer, song)

@@ -139,6 +139,31 @@ function AutomationModel.remove_line(model, line_id)
   return true
 end
 
+-- Removes every generated lyric line and its timing cues, while keeping LT so
+-- the presentation can retain its song title when a new lyric is generated.
+function AutomationModel.clear_generated_lines(model)
+  local removed_ids, kept_lines = {}, {}
+  for _, line in ipairs(model.lyrics.lines or {}) do
+    if line.isTitle then
+      table.insert(kept_lines, line)
+    else
+      removed_ids[line.id] = true
+    end
+  end
+  model.lyrics.lines = kept_lines
+  for index = #(model.slides or {}), 1, -1 do
+    local slide = model.slides[index]
+    if not slide.isTitle then table.remove(model.slides, index) end
+  end
+  for index = #(model.cues or {}), 1, -1 do
+    if removed_ids[model.cues[index].target] then table.remove(model.cues, index) end
+  end
+  model.lyrics.source = ""
+  local count = 0
+  for _ in pairs(removed_ids) do count = count + 1 end
+  return count
+end
+
 function AutomationModel.set_title_line(model, artist, title)
   artist = (artist or ""):match("^%s*(.-)%s*$")
   title = (title or ""):match("^%s*(.-)%s*$")
