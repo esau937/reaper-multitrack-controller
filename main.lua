@@ -799,6 +799,9 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   -- Corrige a leitura da posição para atualizar imediatamente quando estiver pausado/parado
   local play_state = reaper.GetPlayState()
   local play_pos = (play_state & 1 == 1) and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+  -- Durante o playback usamos menos amostras visuais. A forma permanece
+  -- legível, mas o desenho gera muito menos comandos por frame no ReaImGui.
+  local wave_step = (play_state & 1 == 1) and 8 or 3
   
   -- Background preto total
   reaper.ImGui_DrawList_AddRectFilled(draw_list, wx, wy, wx+ww, wy+wh, C.win_bg)
@@ -834,7 +837,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   
   -- ── Base Waveform (Sempre visível mesmo sem regiões) ──
   local amp_scale_base = state.loudness_active and 0.50 or 0.90
-  for px = 0, draw_w - 1, 2 do
+  for px = 0, draw_w - 1, wave_step do
       local stable_x = px * 10
       local amp = wave_amp(stable_x, seed) * ((draw_h / 2) * amp_scale_base)
     reaper.ImGui_DrawList_AddLine(draw_list, draw_x + px, mid - amp, draw_x + px, mid + amp, 0xFFFFFF12, 1.0)
@@ -885,7 +888,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
       
       local px_start = math.max(0, math.floor(x1 - draw_x))
       local px_end = math.min(draw_w - 1, math.floor(x2 - draw_x))
-      for px = px_start, px_end, 2 do
+      for px = px_start, px_end, wave_step do
         -- Usa a mesma coordenada fixa da base; o brilho da região não pode
         -- redesenhar a waveform quando a duração da música muda.
         local stable_x = px * 10
@@ -3648,16 +3651,6 @@ local function loop()
       restore_ducking()
     end
   end
-
-  -- A automação continua sendo checada em todos os ciclos, mas a interface
-  -- pesada (waveform, mapas e prévias) é desenhada no máximo a 30 FPS. Isso
-  -- reduz bastante a carga do ReaImGui sem perder precisão nos cues.
-  local now = reaper.time_precise()
-  if state._next_ui_frame and now < state._next_ui_frame then
-    reaper.defer(loop)
-    return
-  end
-  state._next_ui_frame = now + (1 / 30)
 
   local rx, ry, rw, rh = 0, 0, 1920, 1080
   if reaper.JS_Window_GetRect then
