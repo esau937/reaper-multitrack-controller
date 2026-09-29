@@ -2769,9 +2769,12 @@ local function render_automation_sync_editor(ctx)
     -- Same black lyric workspace as a mapped song.  The only empty-state
     -- affordance is a transparent paste target; metadata can be corrected by
     -- clicking LT after the lines are created.
+    local lyric_header_x, lyric_header_y = reaper.ImGui_GetCursorScreenPos(ctx)
+    local lyric_header_w = reaper.ImGui_GetContentRegionAvail(ctx)
     reaper.ImGui_TextColored(ctx, C.text_dim, "Clique aqui e cole a letra.")
-    reaper.ImGui_SameLine(ctx)
-    local create_lines = reaper.ImGui_Button(ctx, "CRIAR LINHAS", 120, 24)
+    reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 120, lyric_header_y)
+    local create_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
+    reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x, lyric_header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
     reaper.ImGui_SetNextItemWidth(ctx, -1)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x00000000)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x00000000)
