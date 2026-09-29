@@ -3201,6 +3201,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 7.0)
     if reaper.ImGui_Button(ctx, "##holyrics_home", 34, 26) then
       state.holyrics_editor_view = "SYNC"
     end
@@ -3241,6 +3242,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
         state.automation_error = "Não há letra mapeada para salvar."
       end
     end
+    reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_Separator(ctx)
     if state.automation_error then
       reaper.ImGui_TextColored(ctx, C.red, "Automação: " .. state.automation_error)
