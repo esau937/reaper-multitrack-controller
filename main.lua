@@ -2780,22 +2780,19 @@ local function render_automation_sync_editor(ctx)
 
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, false)
+  local lyric_header_x, lyric_header_y = reaper.ImGui_GetCursorScreenPos(ctx)
+  local lyric_header_w = reaper.ImGui_GetContentRegionAvail(ctx)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
-  if not is_new_map then
-    reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_TextColored(ctx, C.text_dim, "1 clique mapeia · 2 cliques editam")
-  end
-  reaper.ImGui_Dummy(ctx, 0, 6)
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextColored(ctx, C.text_dim, is_new_map and "Cole a letra abaixo." or "1 clique mapeia · 2 cliques editam")
+  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 120, lyric_header_y)
+  local generate_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
+  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x, lyric_header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
+  reaper.ImGui_Dummy(ctx, 0, 2)
   if is_new_map then
     -- Same black lyric workspace as a mapped song.  The only empty-state
     -- affordance is a transparent paste target; metadata can be corrected by
     -- clicking LT after the lines are created.
-    local lyric_header_x, lyric_header_y = reaper.ImGui_GetCursorScreenPos(ctx)
-    local lyric_header_w = reaper.ImGui_GetContentRegionAvail(ctx)
-    reaper.ImGui_TextColored(ctx, C.text_dim, "Clique aqui e cole a letra.")
-    reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 120, lyric_header_y)
-    local create_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
-    reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x, lyric_header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
     reaper.ImGui_SetNextItemWidth(ctx, -1)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x00000000)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x00000000)
@@ -2806,7 +2803,7 @@ local function render_automation_sync_editor(ctx)
     if lyric_changed then state.automation_import_text = lyrics end
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleColor(ctx, 3)
-    if create_lines then
+    if generate_lines then
       local _, project_name = reaper.GetProjectName(0, "")
       project_name = (project_name or ""):gsub("%.rpp$", "")
       local song = (state.automation_title_song or project_name):match("^%s*(.-)%s*$")
@@ -2828,6 +2825,11 @@ local function render_automation_sync_editor(ctx)
       end
     end
   else
+  if generate_lines then
+    AutomationModel.reflow_slides(model, state.holyrics_lines_per_slide)
+    refresh_lyric_source(model)
+    save_automation_model()
+  end
   for _, line in ipairs(model.lyrics.lines) do
     reaper.ImGui_PushID(ctx, "sync_" .. line.id)
     local editing = state.inline_lyric_edit_id == line.id
