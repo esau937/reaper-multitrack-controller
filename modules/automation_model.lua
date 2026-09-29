@@ -158,7 +158,6 @@ function AutomationModel.clear_generated_lines(model)
   for index = #(model.cues or {}), 1, -1 do
     if removed_ids[model.cues[index].target] then table.remove(model.cues, index) end
   end
-  model.lyrics.source = ""
   local count = 0
   for _ in pairs(removed_ids) do count = count + 1 end
   return count

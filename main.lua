@@ -2806,7 +2806,9 @@ local function render_automation_sync_editor(ctx)
   end
   if clear_generated and generated_line_count > 0 then
     AutomationModel.clear_generated_lines(model)
-    state.automation_import_text = ""
+    -- Return to the pasted-text state so the lyric can be corrected and
+    -- generated again; deleting generated lines must not discard the source.
+    state.automation_import_text = (model.lyrics and model.lyrics.source) or state.automation_import_text
     state.inline_lyric_edit_id = nil
     state.inline_slide_edit_id = nil
     state.pending_lyric_map = nil
