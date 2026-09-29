@@ -71,6 +71,7 @@ local AutomationModel = require("automation_model")
 local AutomationStore = require("automation_store")
 local CueEngine = require("cue_engine")
 local holyrics_transport = require("holyrics_transport").new(reaper)
+local manual_lyrics_editor = require("manual_lyrics_editor").new(reaper)
 
 Repertoire.init(SCRIPT_PATH)
 
@@ -2698,10 +2699,12 @@ local function holyrics_post(action, payload, timeout, target)
 end
 
 local function holyrics_slide_index(model, line_id)
-  for index, slide in ipairs(model.slides or {}) do
+  local index = 0
+  for _, slide in ipairs(model.slides or {}) do
     for _, slide_line_id in ipairs(slide.lineIds or {}) do
-      if slide_line_id == line_id then return index - 1 end -- Holyrics começa em zero.
+      if slide_line_id == line_id then return index end -- Holyrics começa em zero.
     end
+    if #(slide.lineIds or {}) > 0 then index = index + 1 end
   end
   return 0
 end
@@ -3216,7 +3219,11 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     -- disputar espaço com o mapa que é usado no dia a dia.
     local current_header_x = reaper.ImGui_GetCursorPosX(ctx)
     local header_width = current_header_x + reaper.ImGui_GetContentRegionAvail(ctx)
-    reaper.ImGui_SetCursorPos(ctx, math.max(0, header_width - 226), header_y)
+    reaper.ImGui_SetCursorPos(ctx, math.max(0, header_width - 324), header_y)
+    if reaper.ImGui_Button(ctx, "EDITAR", 90, 26) then
+      manual_lyrics_editor:open(ctx, state.automation_model)
+    end
+    reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "ROUTE", 90, 26) then
       state.holyrics_editor_view = state.holyrics_editor_view == "ROUTE" and "SYNC" or "ROUTE"
     end
@@ -3234,6 +3241,18 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       end
     end
     reaper.ImGui_PopStyleVar(ctx)
+    manual_lyrics_editor:render(ctx, state.automation_model, function(draft)
+      local ok, path, warning = AutomationStore.save(draft, 0)
+      if not ok then return nil, path end
+      state.automation_model = draft
+      state.automation_import_text = draft.lyrics.source or ""
+      state.automation_title_artist = draft.lyrics.titleArtist or ""
+      state.automation_title_song = draft.lyrics.titleSong or ""
+      state.automation_error = nil
+      state.automation_export_path, state.automation_export_warning = path, warning
+      state.holyrics_remote_open = false
+      return true
+    end)
     reaper.ImGui_Separator(ctx)
     if state.automation_error then
       reaper.ImGui_TextColored(ctx, C.red, "Automação: " .. state.automation_error)

@@ -98,10 +98,12 @@ function AutomationModel.add_slide(model, line_ids, insert_at)
   local id, display_id = next_id(model, "slide")
   local slide = { id = id, displayId = display_id, lineIds = {} }
   local position = math.max(1, math.min(insert_at or (#model.slides + 1), #model.slides + 1))
+  if model.slides[1] and model.slides[1].isTitle then position = math.max(2, position) end
   table.insert(model.slides, position, slide)
 
   for _, line_id in ipairs(line_ids or {}) do
-    if find_line(model, line_id) then
+    local _, line = find_line(model, line_id)
+    if line and not line.isTitle then
       remove_line_from_slides(model, line_id)
       table.insert(slide.lineIds, line_id)
     end
@@ -118,6 +120,7 @@ function AutomationModel.add_line(model, text, slide_id, insert_at)
   if not slide then
     slide = model.slides[#model.slides] or AutomationModel.add_slide(model)
   end
+  if slide.isTitle then slide = AutomationModel.add_slide(model) end
   local position = math.max(1, math.min(insert_at or (#slide.lineIds + 1), #slide.lineIds + 1))
   table.insert(slide.lineIds, position, line.id)
   return line
@@ -178,6 +181,7 @@ function AutomationModel.move_line(model, line_id, target_slide_id, target_index
   local _, target = find_slide(model, target_slide_id)
   if not line then return nil, "Linha não encontrada: " .. tostring(line_id) end
   if not target then return nil, "Slide não encontrado: " .. tostring(target_slide_id) end
+  if line.isTitle or target.isTitle then return nil, "LT permanece sozinha no primeiro slide." end
   remove_line_from_slides(model, line_id)
   local position = math.max(1, math.min(target_index or (#target.lineIds + 1), #target.lineIds + 1))
   table.insert(target.lineIds, position, line_id)
@@ -229,6 +233,15 @@ end
 function AutomationModel.get_line(model, line_id)
   local _, line = find_line(model, line_id)
   return line
+end
+
+function AutomationModel.move_slide(model, slide_id, direction)
+  local index, slide = find_slide(model, slide_id)
+  if not slide or slide.isTitle then return false end
+  local destination = index + direction
+  if not model.slides[destination] or model.slides[destination].isTitle then return false end
+  model.slides[index], model.slides[destination] = model.slides[destination], slide
+  return true
 end
 
 function AutomationModel.add_cue(model, time, region_id, action, target_id)
