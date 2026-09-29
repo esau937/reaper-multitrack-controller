@@ -3201,9 +3201,21 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
-    if reaper.ImGui_Button(ctx, "⌂##holyrics_home", 34, 26) then
+    if reaper.ImGui_Button(ctx, "##holyrics_home", 34, 26) then
       state.holyrics_editor_view = "SYNC"
     end
+    local home_x1, home_y1 = reaper.ImGui_GetItemRectMin(ctx)
+    local home_x2, home_y2 = reaper.ImGui_GetItemRectMax(ctx)
+    local home_draw = reaper.ImGui_GetWindowDrawList(ctx)
+    local hx, hy = (home_x1 + home_x2) / 2, home_y1 + 7
+    local house_color = C.text
+    -- Ícone desenhado à mão: evita depender de caracteres que a fonte do
+    -- REAPER pode substituir por "?".
+    reaper.ImGui_DrawList_AddLine(home_draw, hx - 8, hy + 6, hx, hy, house_color, 1.6)
+    reaper.ImGui_DrawList_AddLine(home_draw, hx, hy, hx + 8, hy + 6, house_color, 1.6)
+    reaper.ImGui_DrawList_AddRect(home_draw, hx - 6, hy + 6, hx + 6, hy + 15, house_color, 1.0, 0, 1.6)
+    reaper.ImGui_DrawList_AddLine(home_draw, hx - 1.5, hy + 15, hx - 1.5, hy + 10, house_color, 1.6)
+    reaper.ImGui_DrawList_AddLine(home_draw, hx + 1.5, hy + 15, hx + 1.5, hy + 10, house_color, 1.6)
     if reaper.ImGui_IsItemHovered(ctx) then
       reaper.ImGui_SetTooltip(ctx, "Início")
     end
