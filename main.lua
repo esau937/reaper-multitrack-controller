@@ -2675,6 +2675,11 @@ local function render_automation_sync_editor(ctx)
     -- created here before the mapping surface is shown.
     reaper.ImGui_Text(ctx, "NOVA LETRA")
     reaper.ImGui_Dummy(ctx, 0, 8)
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Cantor")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local artist_changed, artist = reaper.ImGui_InputText(ctx, "##new_automation_artist", state.automation_title_artist or "")
+    if artist_changed then state.automation_title_artist = artist end
+    reaper.ImGui_Dummy(ctx, 0, 6)
     reaper.ImGui_TextColored(ctx, C.text_dim, "Título da música")
     reaper.ImGui_SetNextItemWidth(ctx, -1)
     local title_changed, title = reaper.ImGui_InputText(ctx, "##new_automation_title", state.automation_title_song or "")
@@ -2700,14 +2705,15 @@ local function render_automation_sync_editor(ctx)
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "GERAR MAPA", 120, 28) then
       local song = (state.automation_title_song or ""):match("^%s*(.-)%s*$")
+      local artist = (state.automation_title_artist or ""):match("^%s*(.-)%s*$")
       local source = (state.automation_import_text or ""):match("^%s*(.-)%s*$")
-      if song == "" then
-        state.automation_error = "Informe o título da música."
+      if artist == "" or song == "" then
+        state.automation_error = "Informe o cantor e o título da música."
       elseif source == "" then
         state.automation_error = "Cole ou escreva ao menos uma linha da letra."
       else
         local new_model = AutomationModel.import_text(source, state.holyrics_lines_per_slide)
-        local title_line, title_error = AutomationModel.set_title_line(new_model, "", song)
+        local title_line, title_error = AutomationModel.set_title_line(new_model, artist, song)
         if title_line then
           state.automation_model = new_model
           state.automation_error = nil
