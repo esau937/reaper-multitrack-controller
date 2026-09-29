@@ -2995,19 +2995,33 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_Dummy(ctx, 0, 6)
   for _, slide in ipairs(model.slides or {}) do
     reaper.ImGui_PushID(ctx, "slide_preview_" .. slide.id)
+    local is_active_slide = false
+    if current_line_cue then
+      for _, line_id in ipairs(slide.lineIds or {}) do
+        if line_id == current_line_cue.target then
+          is_active_slide = true
+          break
+        end
+      end
+    end
+    local title_color = is_active_slide and HOLYRICS_MAPPED_GREEN or HOLYRICS_ACCENT
+    if is_active_slide then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), HOLYRICS_MAPPED_GREEN)
+    end
     if slide.isTitle then
-      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE DE TÍTULO")
+      reaper.ImGui_TextColored(ctx, title_color, "SLIDE DE TÍTULO")
     else
-      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE " .. slide.displayId)
+      reaper.ImGui_TextColored(ctx, title_color, "SLIDE " .. slide.displayId)
     end
     for _, line_id in ipairs(slide.lineIds or {}) do
       local line = AutomationModel.get_line(model, line_id)
       if line then
-        reaper.ImGui_TextColored(ctx, C.text_dim, line.displayId)
+        reaper.ImGui_TextColored(ctx, is_active_slide and HOLYRICS_MAPPED_GREEN or C.text_dim, line.displayId)
         reaper.ImGui_SameLine(ctx, 42)
         reaper.ImGui_TextWrapped(ctx, line.text)
       end
     end
+    if is_active_slide then reaper.ImGui_PopStyleColor(ctx) end
     reaper.ImGui_Dummy(ctx, 0, 5)
     reaper.ImGui_PopID(ctx)
   end
