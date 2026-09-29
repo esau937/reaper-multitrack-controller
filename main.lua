@@ -2680,6 +2680,23 @@ local function render_automation_sync_editor(ctx)
   local current_line_cue = active_line_cue(model, timeline_position + (state.lyrics_preview_lead or 0))
   if not region_has_line_cue(model, current_region) then current_line_cue = nil end
 
+  -- Wait briefly before committing a simple click. This distinguishes it from
+  -- the first half of a double click without placing an invisible widget over
+  -- the lyric row (which previously caused ReaImGui child-stack crashes).
+  local pending_map = state.pending_lyric_map
+  if pending_map and reaper.time_precise() - pending_map.started_at >= 0.24 then
+    state.pending_lyric_map = nil
+    if pending_map.model == model then
+      local cue, err = AutomationModel.add_cue(model, pending_map.time, pending_map.region_id, "SHOW_LINE", pending_map.line_id)
+      if cue then
+        state.automation_error = nil
+        save_automation_model()
+      else
+        state.automation_error = err
+      end
+    end
+  end
+
   local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
   -- The timeline is the main working surface: give it the full width and a
   -- taller lane. Mapping details live in the compact panels underneath.
@@ -2764,6 +2781,10 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, false)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
+  if not is_new_map then
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_TextColored(ctx, C.text_dim, "1 clique mapeia · 2 cliques editam")
+  end
   reaper.ImGui_Dummy(ctx, 0, 6)
   if is_new_map then
     -- Same black lyric workspace as a mapped song.  The only empty-state
@@ -2844,9 +2865,18 @@ local function render_automation_sync_editor(ctx)
       reaper.ImGui_Text(ctx, label)
     end
     if not editing then
-      if reaper.ImGui_IsItemClicked(ctx, 0) then
+      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+        state.pending_lyric_map = nil
         state.inline_lyric_edit_id = line.id
         state.inline_lyric_focus_id = line.id
+      elseif reaper.ImGui_IsItemClicked(ctx, 0) then
+        state.pending_lyric_map = {
+          model = model,
+          line_id = line.id,
+          time = timeline_position,
+          region_id = current_region and tostring(current_region.idx) or nil,
+          started_at = reaper.time_precise(),
+        }
       end
     end
     reaper.ImGui_PopID(ctx)
