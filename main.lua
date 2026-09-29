@@ -3247,12 +3247,6 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     if state.automation_error then
       reaper.ImGui_TextColored(ctx, C.red, "Automação: " .. state.automation_error)
     end
-    if state.automation_export_warning then
-      reaper.ImGui_TextColored(ctx, C.yellow, "Trackly: " .. state.automation_export_warning)
-    elseif state.automation_export_path then
-      reaper.ImGui_TextColored(ctx, C.text_dim, "Mapa universal Trackly: " .. state.automation_export_path)
-    end
-
     if state.holyrics_editor_view == "SYNC" then
       render_automation_sync_editor(ctx)
     elseif state.holyrics_editor_view == "ROUTE" then
