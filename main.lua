@@ -2789,10 +2789,15 @@ local function render_automation_sync_editor(ctx)
   local lyric_header_x, lyric_header_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local lyric_header_w = reaper.ImGui_GetContentRegionAvail(ctx)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, is_new_map and "Cole a letra abaixo." or "1 clique mapeia · 2 cliques editam")
+  -- Keep the primary action first and the destructive action at the far edge.
   reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 154, lyric_header_y)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5)
+  local generate_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
+  reaper.ImGui_PopStyleVar(ctx)
+  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 28, lyric_header_y)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5)
   local clear_generated = reaper.ImGui_Button(ctx, "##clear_generated_lines", 28, 24)
+  reaper.ImGui_PopStyleVar(ctx)
   local trash_x1, trash_y1 = reaper.ImGui_GetItemRectMin(ctx)
   local trash_x2, trash_y2 = reaper.ImGui_GetItemRectMax(ctx)
   local trash_draw = reaper.ImGui_GetWindowDrawList(ctx)
@@ -2815,8 +2820,6 @@ local function render_automation_sync_editor(ctx)
     state.automation_error = nil
     save_automation_model()
   end
-  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 120, lyric_header_y)
-  local generate_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
   reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x, lyric_header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
   reaper.ImGui_Dummy(ctx, 0, 2)
   if is_new_map then
@@ -2926,12 +2929,9 @@ local function render_automation_sync_editor(ctx)
   local header_x, header_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local header_w = reaper.ImGui_GetContentRegionAvail(ctx)
   reaper.ImGui_Text(ctx, "SLIDES")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Prévia da apresentação")
-  reaper.ImGui_SetCursorScreenPos(ctx, header_x + math.max(160, header_w - 126), header_y)
-  reaper.ImGui_TextDisabled(ctx, "Linhas")
-  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetCursorScreenPos(ctx, header_x + math.max(0, header_w - 44), header_y)
   reaper.ImGui_SetNextItemWidth(ctx, 44)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5)
   if reaper.ImGui_BeginCombo(ctx, "##sync_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
     for _, option in ipairs({"1", "2", "3", "4"}) do
       if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
@@ -2946,6 +2946,7 @@ local function render_automation_sync_editor(ctx)
     end
     reaper.ImGui_EndCombo(ctx)
   end
+  reaper.ImGui_PopStyleVar(ctx)
   reaper.ImGui_SetCursorScreenPos(ctx, header_x, header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
   reaper.ImGui_Dummy(ctx, 0, 6)
   if is_new_map then
