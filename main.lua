@@ -2961,8 +2961,6 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, false)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Clique para mapear • duplo clique para editar • botão direito para organizar.")
   reaper.ImGui_Dummy(ctx, 0, 6)
   for _, line in ipairs(model.lyrics.lines) do
     reaper.ImGui_PushID(ctx, "sync_" .. line.id)
@@ -2972,16 +2970,23 @@ local function render_automation_sync_editor(ctx)
     local row_x, row_y = reaper.ImGui_GetCursorScreenPos(ctx)
     local row_w = reaper.ImGui_GetContentRegionAvail(ctx)
     if editing then
-      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, line.displayId)
+      reaper.ImGui_TextColored(ctx, is_active_line and HOLYRICS_MAPPED_GREEN or HOLYRICS_ACCENT, line.displayId)
       reaper.ImGui_SameLine(ctx, 38)
       reaper.ImGui_SetNextItemWidth(ctx, -1)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x00000000)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x00000000)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x00000000)
+      reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 0)
       if state.inline_lyric_focus_id == line.id then
         reaper.ImGui_SetKeyboardFocusHere(ctx)
         state.inline_lyric_focus_id = nil
       end
-      local changed, text = reaper.ImGui_InputText(ctx, "##inline_edit", line.text)
+      local submitted, text = reaper.ImGui_InputText(ctx, "##inline_edit", line.text, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+      local changed = text ~= line.text
       if changed then line.text = text end
-      if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+      reaper.ImGui_PopStyleVar(ctx)
+      reaper.ImGui_PopStyleColor(ctx, 3)
+      if submitted or reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
         state.inline_lyric_edit_id = nil
         refresh_lyric_source(model)
         save_automation_model()
@@ -2996,22 +3001,10 @@ local function render_automation_sync_editor(ctx)
     if not editing then
       local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
       reaper.ImGui_SetCursorScreenPos(ctx, row_x, row_y)
-      reaper.ImGui_InvisibleButton(ctx, "##map_line", row_w, line_h)
-      if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_InvisibleButton(ctx, "##edit_line", row_w, line_h)
+      if reaper.ImGui_IsItemClicked(ctx, 0) then
         state.inline_lyric_edit_id = line.id
         state.inline_lyric_focus_id = line.id
-      elseif reaper.ImGui_IsItemClicked(ctx, 0) then
-      local region_id = nil
-      for _, region in ipairs(regions) do
-        if timeline_position >= region.pos and timeline_position <= region.end_pos then region_id = tostring(region.idx); break end
-      end
-      local cue, err = AutomationModel.add_cue(model, timeline_position, region_id, "SHOW_LINE", line.id)
-      if cue then
-        state.automation_error = nil
-        save_automation_model()
-      else
-        state.automation_error = err
-      end
       end
     end
     reaper.ImGui_PopID(ctx)
@@ -3020,9 +3013,28 @@ local function render_automation_sync_editor(ctx)
 
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_BeginChild(ctx, "##sync_slides_preview", 0, details_h, false)
+  local header_x, header_y = reaper.ImGui_GetCursorScreenPos(ctx)
+  local header_w = reaper.ImGui_GetContentRegionAvail(ctx)
   reaper.ImGui_Text(ctx, "SLIDES")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Prévia da apresentação")
+  reaper.ImGui_SetCursorScreenPos(ctx, header_x + math.max(160, header_w - 126), header_y)
+  reaper.ImGui_TextDisabled(ctx, "Linhas")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 44)
+  if reaper.ImGui_BeginCombo(ctx, "##sync_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
+    for _, option in ipairs({"1", "2", "3", "4"}) do
+      if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
+        state.holyrics_lines_per_slide = tonumber(option)
+        reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
+        AutomationModel.reflow_slides(model, state.holyrics_lines_per_slide)
+        refresh_lyric_source(model)
+        save_automation_model()
+      end
+    end
+    reaper.ImGui_EndCombo(ctx)
+  end
+  reaper.ImGui_SetCursorScreenPos(ctx, header_x, header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
   reaper.ImGui_Dummy(ctx, 0, 6)
   for _, slide in ipairs(model.slides or {}) do
     reaper.ImGui_PushID(ctx, "slide_preview_" .. slide.id)
@@ -3061,27 +3073,63 @@ local function render_automation_sync_editor(ctx)
     for _, line_id in ipairs(slide.lineIds or {}) do
       local line = AutomationModel.get_line(model, line_id)
       if line then
+        local editing_slide_line = state.inline_slide_edit_id == line.id
         reaper.ImGui_TextColored(ctx, is_active_slide and HOLYRICS_MAPPED_GREEN or C.text_dim, line.displayId)
         reaper.ImGui_SameLine(ctx, 42)
-        reaper.ImGui_TextWrapped(ctx, line.text)
-        if reaper.ImGui_BeginPopupContextItem(ctx, "##line_actions") then
-          if reaper.ImGui_MenuItem(ctx, "Editar texto") then
-            state.inline_lyric_edit_id = line.id
-            state.inline_lyric_focus_id = line.id
+        if editing_slide_line then
+          reaper.ImGui_SetNextItemWidth(ctx, -1)
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x00000000)
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x00000000)
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x00000000)
+          reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 0)
+          if state.inline_slide_focus_id == line.id then
+            reaper.ImGui_SetKeyboardFocusHere(ctx)
+            state.inline_slide_focus_id = nil
           end
-          if not slide.isTitle and reaper.ImGui_MenuItem(ctx, "Mover para o slide anterior") then
-            local slide_index
-            for index, item in ipairs(model.slides) do if item.id == slide.id then slide_index = index; break end end
-            local previous = slide_index and model.slides[slide_index - 1]
-            if previous and not previous.isTitle and AutomationModel.move_line(model, line.id, previous.id) then save_automation_model() end
+          local submitted, text = reaper.ImGui_InputText(ctx, "##edit_slide_line", line.text, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+          line.text = text
+          reaper.ImGui_PopStyleVar(ctx)
+          reaper.ImGui_PopStyleColor(ctx, 3)
+          local delete_empty = text == "" and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Backspace())
+          if delete_empty and not line.isTitle then
+            local line_position
+            for index, id in ipairs(slide.lineIds) do if id == line.id then line_position = index; break end end
+            local previous_id = line_position and slide.lineIds[line_position - 1]
+            AutomationModel.remove_line(model, line.id)
+            state.inline_slide_edit_id = previous_id
+            state.inline_slide_focus_id = previous_id
+            refresh_lyric_source(model)
+            save_automation_model()
+          elseif submitted then
+            refresh_lyric_source(model)
+            save_automation_model()
+            if line.isTitle then
+              state.inline_slide_edit_id = nil
+            else
+              local line_position = 1
+              for index, id in ipairs(slide.lineIds) do if id == line.id then line_position = index; break end end
+              local new_line = AutomationModel.add_line(model, "", slide.id, line_position + 1)
+              state.inline_slide_edit_id = new_line.id
+              state.inline_slide_focus_id = new_line.id
+              refresh_lyric_source(model)
+              save_automation_model()
+            end
+          elseif reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+            state.inline_slide_edit_id = nil
+            refresh_lyric_source(model)
+            save_automation_model()
           end
-          if not slide.isTitle and reaper.ImGui_MenuItem(ctx, "Mover para o próximo slide") then
-            local slide_index
-            for index, item in ipairs(model.slides) do if item.id == slide.id then slide_index = index; break end end
-            local next_slide = slide_index and model.slides[slide_index + 1]
-            if next_slide and AutomationModel.move_line(model, line.id, next_slide.id) then save_automation_model() end
+        else
+          local line_x, line_y = reaper.ImGui_GetCursorScreenPos(ctx)
+          reaper.ImGui_TextWrapped(ctx, line.text)
+          local line_w = reaper.ImGui_GetContentRegionAvail(ctx)
+          local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+          reaper.ImGui_SetCursorScreenPos(ctx, line_x, line_y)
+          reaper.ImGui_InvisibleButton(ctx, "##edit_slide_line", line_w, line_h)
+          if reaper.ImGui_IsItemClicked(ctx, 0) then
+            state.inline_slide_edit_id = line.id
+            state.inline_slide_focus_id = line.id
           end
-          reaper.ImGui_EndPopup(ctx)
         end
       end
     end

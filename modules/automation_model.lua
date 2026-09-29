@@ -126,6 +126,19 @@ function AutomationModel.add_line(model, text, slide_id, insert_at)
   return line
 end
 
+-- The title is structural and remains alone in the first slide.  Regular
+-- lines, however, can be removed directly from the compact slide editor.
+function AutomationModel.remove_line(model, line_id)
+  local line_index, line = find_line(model, line_id)
+  if not line or line.isTitle then return false end
+  remove_line_from_slides(model, line_id)
+  table.remove(model.lyrics.lines, line_index)
+  for index = #(model.cues or {}), 1, -1 do
+    if model.cues[index].target == line_id then table.remove(model.cues, index) end
+  end
+  return true
+end
+
 function AutomationModel.set_title_line(model, artist, title)
   artist = (artist or ""):match("^%s*(.-)%s*$")
   title = (title or ""):match("^%s*(.-)%s*$")
