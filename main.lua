@@ -801,7 +801,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   local play_pos = (play_state & 1 == 1) and reaper.GetPlayPosition() or reaper.GetCursorPosition()
   -- Durante o playback usamos menos amostras visuais. A forma permanece
   -- legível, mas o desenho gera muito menos comandos por frame no ReaImGui.
-  local wave_step = (play_state & 1 == 1) and 8 or 3
+  local wave_step = (play_state & 1 == 1) and 16 or 3
   
   -- Background preto total
   reaper.ImGui_DrawList_AddRectFilled(draw_list, wx, wy, wx+ww, wy+wh, C.win_bg)
@@ -2706,9 +2706,9 @@ local function holyrics_post(action, payload, timeout, target)
   local request_url = url:gsub("/$", "") .. "/api/" .. action .. "?token=" .. token
   local command = 'curl.exe -s -X POST -H "Content-Type: application/json" --data-binary @"' .. request_file
     .. '" --connect-timeout 2 "' .. request_url .. '" >NUL 2>&1'
-  -- Não use ExecProcess aqui: mesmo com timeout ele pode segurar o thread da
-  -- interface em alguns PCs. `start /b` cria o curl e retorna imediatamente.
-  local ok = pcall(os.execute, 'cmd.exe /d /c start "" /b ' .. command)
+  -- O próprio REAPER inicia o comando oculto. `start /b` solta o curl em
+  -- segundo plano e timeout zero evita segurar o ciclo da interface.
+  local ok = pcall(reaper.ExecProcess, 'cmd.exe /d /c start "" /b ' .. command, 0)
   if not ok then return nil, "Não foi possível iniciar o envio ao Holyrics." end
   return true
 end
