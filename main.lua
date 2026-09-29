@@ -2886,11 +2886,6 @@ local function render_automation_sync_editor(ctx)
   local current_line_cue = active_line_cue(model, timeline_position)
   if not region_has_line_cue(model, current_region) then current_line_cue = nil end
 
-  reaper.ImGui_Text(ctx, "SYNC")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, is_playing and "Playback em andamento - clique na linha no momento desejado." or "Posicione o cursor ou dê Play e clique na linha desejada.")
-  reaper.ImGui_Separator(ctx)
-
   local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
   -- The timeline is the main working surface: give it the full width and a
   -- taller lane. Mapping details live in the compact panels underneath.
