@@ -70,6 +70,7 @@ local Chords = require("chords")
 local AutomationModel = require("automation_model")
 local AutomationStore = require("automation_store")
 local CueEngine = require("cue_engine")
+local holyrics_transport = require("holyrics_transport").new(reaper)
 
 Repertoire.init(SCRIPT_PATH)
 
@@ -778,7 +779,11 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   
   -- Opcional: mantem a funcionalidade do Grid Lock apenas para congelar o Reaper
   if state.grid_lock and state.locked_start and state.locked_end then
-    reaper.GetSet_ArrangeView2(0, true, 0, 0, state.locked_start, state.locked_end)
+    local view_start, view_end = reaper.GetSet_ArrangeView2(0, false, 0, 0, 0, 0)
+    if math.abs(view_start - state.locked_start) > 0.000001 or
+       math.abs(view_end - state.locked_end) > 0.000001 then
+      reaper.GetSet_ArrangeView2(0, true, 0, 0, state.locked_start, state.locked_end)
+    end
   end
   
   -- Waveform SEMPRE ESTÁTICA do início ao fim da música
@@ -2660,6 +2665,9 @@ local function render_visual_click(ctx, position, is_playing)
 end
 
 local function test_route_api(url, token)
+  if (reaper.GetPlayState() & 1) == 1 then
+    return nil, "Pare a reprodução antes de testar a conexão."
+  end
   url = (url or ""):match("^%s*(.-)%s*$")
   if not url:match("^https?://[%w%._%-]+:%d+/?$") then
     return nil, "Informe um endereço no formato http://IP:PORTA."
@@ -2686,31 +2694,7 @@ end
 -- quebras de linha sem deixar o curl disputar tempo com o playback.
 local function holyrics_post(action, payload, timeout, target)
   target = target or state.code_api_targets[1] or {}
-  local url = (target.url or ""):match("^%s*(.-)%s*$")
-  local token = (target.token or ""):match("^%s*(.-)%s*$")
-  if not url:match("^https?://[%w%._%-]+:%d+/?$") then
-    return nil, "Informe o endereço do API Server do Holyrics."
-  end
-  if token == "" or not token:match("^[%w_%-]+$") then
-    return nil, "Informe um token válido do Holyrics."
-  end
-  local encoded = json.encode(payload or {})
-  state.holyrics_request_sequence = (state.holyrics_request_sequence or 0) + 1
-  local request_file = string.format("%s/holyrics-code-request-%d-%d.json",
-    reaper.GetResourcePath(), math.floor((reaper.time_precise() or 0) * 1000000), state.holyrics_request_sequence)
-  local file, write_error = io.open(request_file, "wb")
-  if not file then return nil, "Não foi possível preparar o envio: " .. tostring(write_error) end
-  file:write(encoded)
-  file:close()
-
-  local request_url = url:gsub("/$", "") .. "/api/" .. action .. "?token=" .. token
-  local command = 'curl.exe -s -X POST -H "Content-Type: application/json" --data-binary @"' .. request_file
-    .. '" --connect-timeout 2 "' .. request_url .. '" >NUL 2>&1'
-  -- O próprio REAPER inicia o comando oculto. `start /b` solta o curl em
-  -- segundo plano e timeout zero evita segurar o ciclo da interface.
-  local ok = pcall(reaper.ExecProcess, 'cmd.exe /d /c start "" /b ' .. command, 0)
-  if not ok then return nil, "Não foi possível iniciar o envio ao Holyrics." end
-  return true
+  return holyrics_transport:enqueue(target, action, payload or {})
 end
 
 local function holyrics_slide_index(model, line_id)
@@ -2744,13 +2728,13 @@ local function open_holyrics_presentation(model, line_id)
       slides = slides,
       initial_index = holyrics_slide_index(model, line_id)
     }, 3500, target)
-    target.status = { ok = ok, message = ok and "Conectado" or err }
+    target.status = { ok = false, message = ok and "Apresentação na fila." or err }
     if ok then delivered = delivered + 1 else failures[#failures + 1] = (target.name or "Holyrics") .. ": " .. (err or "erro") end
   end
   if delivered > 0 then
     state.holyrics_remote_open = true
     state.holyrics_remote_model = model
-    if #failures == 0 then return true, "Apresentação enviada para " .. delivered .. " Holyrics." end
+    if #failures == 0 then return true, "Apresentação na fila para " .. delivered .. " Holyrics; confira a confirmação de cada destino." end
     return nil, "Enviado para " .. delivered .. "; falhou em " .. table.concat(failures, " | ")
   end
   return nil, #failures > 0 and table.concat(failures, " | ") or "Nenhum destino Holyrics foi configurado."
@@ -2768,12 +2752,12 @@ local function send_holyrics_line(cue)
     local ok, err = holyrics_post("ActionGoToIndex", {
       index = holyrics_slide_index(state.automation_model, cue.target)
     }, 1500, target)
-    target.status = { ok = ok, message = ok and "Conectado" or err }
+    target.status = { ok = false, message = ok and "Slide na fila." or err }
     if ok then delivered = delivered + 1 else failures[#failures + 1] = target.name or "Holyrics" end
   end
   state.holyrics_remote_status = {
     ok = delivered > 0 and #failures == 0,
-    message = #failures == 0 and ("Slide enviado para " .. delivered .. " Holyrics.")
+    message = #failures == 0 and ("Slide na fila para " .. delivered .. " Holyrics.")
       or ("Slide enviado para " .. delivered .. "; falhou: " .. table.concat(failures, ", "))
   }
 end
@@ -3577,6 +3561,7 @@ end
 -- ─── Main loop ───────────────────────────────────────────────────────────────
 
 local function loop()
+  local frame_started = reaper.time_precise()
   -- ─── Lógica do HOLD (Auto-Avanço de Aba) ───
   local current_play_state = reaper.GetPlayState() & 1
   local playback_started = current_play_state == 1 and state._last_play_state ~= 1
@@ -3628,6 +3613,9 @@ local function loop()
   end
 
   -- O duck é aplicado a cada projeto aberto, inclusive quando a aba muda durante a execução.
+  local network_started = reaper.time_precise()
+  holyrics_transport:update()
+  local network_ms = (reaper.time_precise() - network_started) * 1000
   if state.click_ducked then
     capture_duck_snapshot(reaper.EnumProjects(-1))
   end
@@ -3747,6 +3735,16 @@ local function loop()
   -- ALWAYS call End() — mesmo se visible=false ou se houve erro
   reaper.ImGui_End(ctx)
 
+  -- In-memory diagnostics: no console output or disk writes during playback.
+  local frame_ms = (reaper.time_precise() - frame_started) * 1000
+  state.performance_peak_ms = math.max(state.performance_peak_ms or 0, frame_ms)
+  state.performance_network_peak_ms = math.max(state.performance_network_peak_ms or 0, network_ms)
+  if frame_started >= (state.performance_publish_at or 0) then
+    reaper.SetExtState("MultitrackController", "performance", string.format(
+      "frame_peak_ms=%.2f network_peak_ms=%.2f", state.performance_peak_ms, state.performance_network_peak_ms), false)
+    state.performance_peak_ms, state.performance_network_peak_ms = 0, 0
+    state.performance_publish_at = frame_started + 2
+  end
   if open then
     reaper.defer(loop)
   end
