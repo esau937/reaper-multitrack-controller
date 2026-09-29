@@ -6,6 +6,7 @@ data/setlists/*.json
 main_backup_*.lua
 test_*.lua
 dump_fonts.lua
+.test-runtime/
 
 # OS/editor files.
 .DS_Store
