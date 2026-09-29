@@ -16,7 +16,8 @@ local api = {
   ExecProcess = function(command, timeout)
     assert(timeout == -1, 'must never wait for a network request')
     assert(not command:find('cmd.exe', 1, true) and not command:find('start ', 1, true))
-    assert(command:find('--max-time 2', 1, true))
+    assert(command:find('wscript.exe" //B //NoLogo', 1, true))
+    assert(command:find('holyrics_hidden.vbs', 1, true))
     calls[#calls + 1] = command
     return '0'
   end

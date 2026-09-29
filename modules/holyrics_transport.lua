@@ -1,5 +1,6 @@
--- Bounded, ordered HTTP delivery. ExecProcess -1 starts curl without waiting.
+-- Bounded, ordered HTTP delivery. A GUI helper hides curl without blocking REAPER.
 local json = require('json')
+local module_path = debug.getinfo(1, 'S').source:sub(2):match('^(.*[/\\])') or ''
 local Transport = {}
 Transport.__index = Transport
 
@@ -67,10 +68,10 @@ function Transport:update()
       if file then
         file:write(job.payload)
         file:close()
-        local executable = (os.getenv('SystemRoot') or 'C:/Windows') .. '/System32/curl.exe'
-        local command = '"' .. executable .. '" --silent --connect-timeout 1 --max-time 2' ..
-          ' --request POST --header "Content-Type: application/json" --data-binary "@' ..
-          job.request .. '" --output "' .. job.response .. '" "' .. job.url .. '"'
+        local system_dir = (os.getenv('SystemRoot') or 'C:/Windows') .. '/System32/'
+        local command = '"' .. system_dir .. 'wscript.exe" //B //NoLogo "' ..
+          module_path .. 'holyrics_hidden.vbs" "' .. system_dir .. 'curl.exe" "' ..
+          job.request .. '" "' .. job.response .. '" "' .. job.url .. '"'
         local ok, output = pcall(self.api.ExecProcess, command, -1)
         if ok and output and output ~= '' then
           job.deadline = now + 3
