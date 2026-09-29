@@ -2944,9 +2944,8 @@ local function render_automation_sync_editor(ctx)
   local _, details_h = reaper.ImGui_GetContentRegionAvail(ctx)
   local cue_panel_w = available_w * 0.28
   local lyric_panel_w = available_w * 0.45
-  reaper.ImGui_BeginChild(ctx, "##cue_list", cue_panel_w, details_h, true)
+  reaper.ImGui_BeginChild(ctx, "##cue_list", cue_panel_w, details_h, false)
   reaper.ImGui_Text(ctx, "LINHAS MAPEADAS")
-  reaper.ImGui_Separator(ctx)
   if #(model.cues or {}) == 0 then
     reaper.ImGui_TextDisabled(ctx, "Nenhuma linha mapeada ainda. Clique numa linha da letra à direita.")
   end
@@ -2968,11 +2967,10 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_EndChild(ctx)
 
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, true)
+  reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, false)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Clique em uma linha para mapear no tempo atual.")
-  reaper.ImGui_Separator(ctx)
   for _, line in ipairs(model.lyrics.lines) do
     reaper.ImGui_PushID(ctx, "sync_" .. line.id)
     local label = line.displayId .. "  " .. line.text
@@ -3007,11 +3005,10 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_EndChild(ctx)
 
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##sync_slides_preview", 0, details_h, true)
+  reaper.ImGui_BeginChild(ctx, "##sync_slides_preview", 0, details_h, false)
   reaper.ImGui_Text(ctx, "SLIDES")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Prévia da apresentação")
-  reaper.ImGui_Separator(ctx)
   for _, slide in ipairs(model.slides or {}) do
     reaper.ImGui_PushID(ctx, "slide_preview_" .. slide.id)
     if slide.isTitle then
@@ -3027,7 +3024,7 @@ local function render_automation_sync_editor(ctx)
         reaper.ImGui_TextWrapped(ctx, line.text)
       end
     end
-    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_Dummy(ctx, 0, 5)
     reaper.ImGui_PopID(ctx)
   end
   reaper.ImGui_EndChild(ctx)
