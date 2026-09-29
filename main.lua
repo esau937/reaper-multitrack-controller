@@ -219,7 +219,7 @@ local state = {
   holyrics_editing_line = nil,
   holyrics_editing_text = "",
   holyrics_editing_focused = false,
-  holyrics_editor_view = "LETRA",
+  holyrics_editor_view = "SYNC",
   holyrics_window_w = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_w")) or 1400,
   holyrics_window_h = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_h")) or 900,
   holyrics_window_x = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_x")),
@@ -3201,7 +3201,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
-    for index, view in ipairs({"LETRA", "SLIDES", "SYNC", "PREVIEW", "ROUTE"}) do
+    for index, view in ipairs({"SYNC", "ROUTE"}) do
       if index > 1 then reaper.ImGui_SameLine(ctx) end
       if reaper.ImGui_Button(ctx, view, 90, 26) then state.holyrics_editor_view = view end
     end
@@ -3228,21 +3228,15 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.ImGui_TextColored(ctx, C.text_dim, "Mapa universal Trackly: " .. state.automation_export_path)
     end
 
-    if state.holyrics_editor_view == "LETRA" then
-      render_automation_lyrics_editor(ctx)
-    elseif state.holyrics_editor_view == "SLIDES" then
-      render_automation_slides_editor(ctx)
-    elseif state.holyrics_editor_view == "SYNC" then
+    if state.holyrics_editor_view == "SYNC" then
       render_automation_sync_editor(ctx)
-    elseif state.holyrics_editor_view == "PREVIEW" then
-      render_automation_preview(ctx)
     elseif state.holyrics_editor_view == "ROUTE" then
       render_route_editor(ctx)
     else
-      -- The retired editor is intentionally no longer exposed in the UI.
-      -- Fall back to the new lyric model if an old in-memory tab value remains.
-      state.holyrics_editor_view = "LETRA"
-      render_automation_lyrics_editor(ctx)
+      -- As abas antigas foram incorporadas ao SYNC. Qualquer estado antigo
+      -- abre diretamente no fluxo compacto do dia a dia.
+      state.holyrics_editor_view = "SYNC"
+      render_automation_sync_editor(ctx)
       --[[
     local proj_regions = {}
     local idx = 0
