@@ -2826,19 +2826,39 @@ local function render_automation_sync_editor(ctx)
     -- Same black lyric workspace as a mapped song.  The only empty-state
     -- affordance is a transparent paste target; metadata can be corrected by
     -- clicking LT after the lines are created.
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Artista")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x141A22FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x1E293BFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x1E293BFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), 0x3A4A60FF)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
+    local draft_artist = state.automation_title_artist or ""
+    local draft_song = state.automation_title_song or ""
+    if model and model.lyrics then
+      if draft_artist == "" then draft_artist = model.lyrics.titleArtist or "" end
+      if draft_song == "" then draft_song = model.lyrics.titleSong or "" end
+    end
+    local artist_changed, artist = reaper.ImGui_InputText(ctx, "##automation_artist", draft_artist)
+    if artist_changed then state.automation_title_artist = artist end
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Música")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local title_changed, title = reaper.ImGui_InputText(ctx, "##automation_title", draft_song)
+    if title_changed then state.automation_title_song = title end
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleColor(ctx, 4)
+    reaper.ImGui_Dummy(ctx, 0, 4)
     reaper.ImGui_SetNextItemWidth(ctx, -1)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x00000000)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x00000000)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x00000000)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 0)
-    local lyric_height = math.max(120, details_h - 42)
+    local lyric_height = math.max(120, details_h - 96)
     local lyric_changed, lyrics = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics", state.automation_import_text or "", -1, lyric_height)
     if lyric_changed then state.automation_import_text = lyrics end
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleColor(ctx, 3)
     if generate_lines then
-      local _, project_name = reaper.GetProjectName(0, "")
-      project_name = (project_name or ""):gsub("%.rpp$", "")
       local song = (state.automation_title_song or ""):match("^%s*(.-)%s*$")
       local singer = (state.automation_title_artist or ""):match("^%s*(.-)%s*$")
       local source = (state.automation_import_text or ""):match("^%s*(.-)%s*$")
@@ -2849,16 +2869,18 @@ local function render_automation_sync_editor(ctx)
           song = (model.lyrics.titleSong or ""):match("^%s*(.-)%s*$")
           singer = singer ~= "" and singer or (model.lyrics.titleArtist or ""):match("^%s*(.-)%s*$")
         end
-        if song == "" then song = project_name end
-        if singer == "" and song == "" then song = "Nova música" end
-        local new_model = AutomationModel.import_text(source, state.holyrics_lines_per_slide)
-        local title_line, title_error = AutomationModel.set_title_line(new_model, singer, song)
-        if title_line then
-          state.automation_model = new_model
-          state.automation_error = nil
-          save_automation_model()
+        if singer == "" or song == "" then
+          state.automation_error = "Informe o artista e o nome da música antes de gerar as linhas."
         else
-          state.automation_error = title_error
+          local new_model = AutomationModel.import_text(source, state.holyrics_lines_per_slide)
+          local title_line, title_error = AutomationModel.set_title_line(new_model, singer, song)
+          if title_line then
+            state.automation_model = new_model
+            state.automation_error = nil
+            save_automation_model()
+          else
+            state.automation_error = title_error
+          end
         end
       end
     end
@@ -2873,6 +2895,9 @@ local function render_automation_sync_editor(ctx)
     local editing = state.inline_lyric_edit_id == line.id
     local label = line.displayId .. "  " .. line.text
     local is_active_line = current_line_cue and current_line_cue.target == line.id
+    if line.isTitle then
+      reaper.ImGui_TextColored(ctx, C.text_dim, "SLIDE DE TÍTULO")
+    end
     local row_x, row_y = reaper.ImGui_GetCursorScreenPos(ctx)
     local row_w = reaper.ImGui_GetContentRegionAvail(ctx)
     if editing then
@@ -2897,6 +2922,10 @@ local function render_automation_sync_editor(ctx)
         refresh_lyric_source(model)
         save_automation_model()
       end
+    elseif line.isTitle then
+      local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+      reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), row_x, row_y, row_x + row_w, row_y + line_h, 0x193B5C88)
+      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, label)
     elseif is_active_line then
       local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
       reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), row_x, row_y, row_x + row_w, row_y + line_h, 0x14532D88)
@@ -2919,6 +2948,7 @@ local function render_automation_sync_editor(ctx)
         }
       end
     end
+    if line.isTitle then reaper.ImGui_Dummy(ctx, 0, 6) end
     reaper.ImGui_PopID(ctx)
   end
   end
