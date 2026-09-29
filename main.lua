@@ -2791,23 +2791,27 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, is_new_map and "Cole a letra abaixo." or "1 clique mapeia · 2 cliques editam")
-  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 248, lyric_header_y)
-  reaper.ImGui_SetNextItemWidth(ctx, 120)
-  if reaper.ImGui_BeginCombo(ctx, "##generated_lines", "GERADAS " .. tostring(generated_line_count)) then
-    reaper.ImGui_TextDisabled(ctx, tostring(generated_line_count) .. " linhas geradas")
-    if generated_line_count > 0 then
-      reaper.ImGui_Separator(ctx)
-      if reaper.ImGui_Button(ctx, "EXCLUIR TODAS", 112, 24) then
-        local removed = AutomationModel.clear_generated_lines(model)
-        state.automation_import_text = ""
-        state.inline_lyric_edit_id = nil
-        state.inline_slide_edit_id = nil
-        state.pending_lyric_map = nil
-        state.automation_error = removed > 0 and nil or "Não há linhas geradas para excluir."
-        save_automation_model()
-      end
-    end
-    reaper.ImGui_EndCombo(ctx)
+  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 154, lyric_header_y)
+  local clear_generated = reaper.ImGui_Button(ctx, "##clear_generated_lines", 28, 24)
+  local trash_x1, trash_y1 = reaper.ImGui_GetItemRectMin(ctx)
+  local trash_x2, trash_y2 = reaper.ImGui_GetItemRectMax(ctx)
+  local trash_draw = reaper.ImGui_GetWindowDrawList(ctx)
+  local trash_color = generated_line_count > 0 and C.text or C.text_dim
+  local trash_cx = (trash_x1 + trash_x2) / 2
+  reaper.ImGui_DrawList_AddRect(trash_draw, trash_cx - 5, trash_y1 + 8, trash_cx + 5, trash_y2 - 4, trash_color, 1, 0, 1.3)
+  reaper.ImGui_DrawList_AddLine(trash_draw, trash_cx - 7, trash_y1 + 6, trash_cx + 7, trash_y1 + 6, trash_color, 1.3)
+  reaper.ImGui_DrawList_AddLine(trash_draw, trash_cx - 2, trash_y1 + 4, trash_cx + 2, trash_y1 + 4, trash_color, 1.3)
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Excluir todas as linhas geradas (" .. tostring(generated_line_count) .. ")")
+  end
+  if clear_generated and generated_line_count > 0 then
+    AutomationModel.clear_generated_lines(model)
+    state.automation_import_text = ""
+    state.inline_lyric_edit_id = nil
+    state.inline_slide_edit_id = nil
+    state.pending_lyric_map = nil
+    state.automation_error = nil
+    save_automation_model()
   end
   reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 120, lyric_header_y)
   local generate_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
