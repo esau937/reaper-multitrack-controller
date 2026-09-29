@@ -304,13 +304,15 @@ local function save_holyrics_targets()
   reaper.SetExtState("MultitrackController", "code_api_token", state.code_api_token, true)
 end
 
-local saved_automation, automation_load_error = AutomationStore.load(0)
+local saved_automation, automation_load_error, automation_load_source = AutomationStore.load(0)
 state.automation_model = saved_automation
 state.automation_error = automation_load_error
 if saved_automation then
   -- Upgrade older projects where LT was placed in the first lyric slide.
   local title_slide_upgraded = AutomationModel.normalize_title_slide(saved_automation)
-  if title_slide_upgraded then AutomationStore.save(saved_automation, 0) end
+  -- A sidecar is the portable Trackly source.  Mirror it back into the .RPP
+  -- immediately so the map also survives a moved or renamed JSON file.
+  if title_slide_upgraded or automation_load_source == "sidecar" then AutomationStore.save(saved_automation, 0) end
   local export_path, export_warning = AutomationStore.export_sidecar(saved_automation, 0)
   state.automation_export_path = export_path
   state.automation_export_warning = export_warning
@@ -679,9 +681,12 @@ local function update_state()
 
       state.cue_engine = CueEngine.new()
 
-      local saved_automation, automation_load_error = AutomationStore.load(0)
+      local saved_automation, automation_load_error, automation_load_source = AutomationStore.load(0)
       state.automation_model = saved_automation
       state.automation_error  = automation_load_error
+      if saved_automation and automation_load_source == "sidecar" then
+        AutomationStore.save(saved_automation, 0)
+      end
     end
     
     state.sections = Sections.get_from_project(proj)

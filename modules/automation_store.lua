@@ -47,15 +47,25 @@ end
 
 function Store.load(proj)
   local retval, value = reaper.GetProjExtState(proj or 0, SECTION, KEY)
-  if retval ~= 0 and value ~= "" then return validate_json(value) end
+  local embedded_error = nil
+  if retval ~= 0 and value ~= "" then
+    local model, err = validate_json(value)
+    if model then return model, nil, "project" end
+    -- A stale or partial ExtState must not hide the portable Trackly map.
+    -- This is especially important after a project has been renamed or an
+    -- older .RPP was restored from backup.
+    embedded_error = err
+  end
 
   local path = Store.sidecar_path(proj)
-  if not path then return nil end
+  if not path then return nil, embedded_error end
   local file = io.open(path, "r")
-  if not file then return nil end
+  if not file then return nil, embedded_error end
   local content = file:read("*a")
   file:close()
-  return validate_json(content)
+  local model, err = validate_json(content)
+  if model then return model, nil, "sidecar" end
+  return nil, err or embedded_error
 end
 
 function Store.save(model, proj)
