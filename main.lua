@@ -2797,9 +2797,6 @@ local function render_automation_sync_editor(ctx)
       reaper.ImGui_Text(ctx, label)
     end
     if not editing then
-      local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
-      reaper.ImGui_SetCursorScreenPos(ctx, row_x, row_y)
-      reaper.ImGui_InvisibleButton(ctx, "##edit_line", row_w, line_h)
       if reaper.ImGui_IsItemClicked(ctx, 0) then
         state.inline_lyric_edit_id = line.id
         state.inline_lyric_focus_id = line.id
@@ -2918,12 +2915,7 @@ local function render_automation_sync_editor(ctx)
             save_automation_model()
           end
         else
-          local line_x, line_y = reaper.ImGui_GetCursorScreenPos(ctx)
           reaper.ImGui_TextWrapped(ctx, line.text)
-          local line_w = reaper.ImGui_GetContentRegionAvail(ctx)
-          local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
-          reaper.ImGui_SetCursorScreenPos(ctx, line_x, line_y)
-          reaper.ImGui_InvisibleButton(ctx, "##edit_slide_line", line_w, line_h)
           if reaper.ImGui_IsItemClicked(ctx, 0) then
             state.inline_slide_edit_id = line.id
             state.inline_slide_focus_id = line.id
