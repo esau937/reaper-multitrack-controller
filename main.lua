@@ -3201,9 +3201,17 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.SetExtState("MultitrackController", "holyrics_window_h", tostring(actual_h), true)
     end
 
+    if reaper.ImGui_Button(ctx, "⌂##holyrics_home", 34, 26) then
+      state.holyrics_editor_view = "SYNC"
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Início")
+    end
+
     -- SYNC é a própria tela inicial. As únicas ações ficam à direita para não
     -- disputar espaço com o mapa que é usado no dia a dia.
-    local header_width = reaper.ImGui_GetContentRegionAvail(ctx)
+    local current_header_x = reaper.ImGui_GetCursorPosX(ctx)
+    local header_width = current_header_x + reaper.ImGui_GetContentRegionAvail(ctx)
     reaper.ImGui_SetCursorPosX(ctx, math.max(0, header_width - 226))
     if reaper.ImGui_Button(ctx, "ROUTE", 90, 26) then
       state.holyrics_editor_view = state.holyrics_editor_view == "ROUTE" and "SYNC" or "ROUTE"
