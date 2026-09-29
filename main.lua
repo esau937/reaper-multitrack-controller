@@ -71,7 +71,6 @@ local AutomationModel = require("automation_model")
 local AutomationStore = require("automation_store")
 local CueEngine = require("cue_engine")
 local holyrics_transport = require("holyrics_transport").new(reaper)
-local manual_lyrics_editor = require("manual_lyrics_editor").new(reaper)
 
 Repertoire.init(SCRIPT_PATH)
 
@@ -2609,6 +2608,14 @@ local function format_cue_time(seconds)
   return string.format("%02d:%05.2f", math.floor(seconds / 60), seconds % 60)
 end
 
+local function refresh_lyric_source(model)
+  local lines = {}
+  for _, line in ipairs(model.lyrics.lines or {}) do
+    if not line.isTitle then lines[#lines + 1] = line.text or "" end
+  end
+  model.lyrics.source = table.concat(lines, "\n")
+end
+
 local function cue_target_label(model, cue)
   if cue.action == "SHOW_LINE" then
     local line = AutomationModel.get_line(model, cue.target)
@@ -2955,25 +2962,45 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, false)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Clique em uma linha para mapear no tempo atual.")
+  reaper.ImGui_TextColored(ctx, C.text_dim, "Clique para mapear • duplo clique para editar • botão direito para organizar.")
   reaper.ImGui_Dummy(ctx, 0, 6)
   for _, line in ipairs(model.lyrics.lines) do
     reaper.ImGui_PushID(ctx, "sync_" .. line.id)
+    local editing = state.inline_lyric_edit_id == line.id
     local label = line.displayId .. "  " .. line.text
     local is_active_line = current_line_cue and current_line_cue.target == line.id
     local row_x, row_y = reaper.ImGui_GetCursorScreenPos(ctx)
     local row_w = reaper.ImGui_GetContentRegionAvail(ctx)
-    if is_active_line then
+    if editing then
+      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, line.displayId)
+      reaper.ImGui_SameLine(ctx, 38)
+      reaper.ImGui_SetNextItemWidth(ctx, -1)
+      if state.inline_lyric_focus_id == line.id then
+        reaper.ImGui_SetKeyboardFocusHere(ctx)
+        state.inline_lyric_focus_id = nil
+      end
+      local changed, text = reaper.ImGui_InputText(ctx, "##inline_edit", line.text)
+      if changed then line.text = text end
+      if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+        state.inline_lyric_edit_id = nil
+        refresh_lyric_source(model)
+        save_automation_model()
+      end
+    elseif is_active_line then
       local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
       reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), row_x, row_y, row_x + row_w, row_y + line_h, 0x14532D88)
       reaper.ImGui_TextColored(ctx, HOLYRICS_MAPPED_GREEN, label)
     else
       reaper.ImGui_Text(ctx, label)
     end
-    local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
-    reaper.ImGui_SetCursorScreenPos(ctx, row_x, row_y)
-    reaper.ImGui_InvisibleButton(ctx, "##map_line", row_w, line_h)
-    if reaper.ImGui_IsItemClicked(ctx, 0) then
+    if not editing then
+      local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+      reaper.ImGui_SetCursorScreenPos(ctx, row_x, row_y)
+      reaper.ImGui_InvisibleButton(ctx, "##map_line", row_w, line_h)
+      if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and reaper.ImGui_IsItemHovered(ctx) then
+        state.inline_lyric_edit_id = line.id
+        state.inline_lyric_focus_id = line.id
+      elseif reaper.ImGui_IsItemClicked(ctx, 0) then
       local region_id = nil
       for _, region in ipairs(regions) do
         if timeline_position >= region.pos and timeline_position <= region.end_pos then region_id = tostring(region.idx); break end
@@ -2984,6 +3011,7 @@ local function render_automation_sync_editor(ctx)
         save_automation_model()
       else
         state.automation_error = err
+      end
       end
     end
     reaper.ImGui_PopID(ctx)
@@ -3016,12 +3044,45 @@ local function render_automation_sync_editor(ctx)
     else
       reaper.ImGui_TextColored(ctx, title_color, "SLIDE " .. slide.displayId)
     end
+    if reaper.ImGui_BeginPopupContextItem(ctx, "##slide_actions") then
+      if not slide.isTitle and reaper.ImGui_MenuItem(ctx, "Adicionar linha") then
+        AutomationModel.add_line(model, "Nova linha", slide.id)
+        refresh_lyric_source(model)
+        save_automation_model()
+      end
+      if not slide.isTitle and reaper.ImGui_MenuItem(ctx, "Mover slide para a esquerda") then
+        if AutomationModel.move_slide(model, slide.id, -1) then save_automation_model() end
+      end
+      if not slide.isTitle and reaper.ImGui_MenuItem(ctx, "Mover slide para a direita") then
+        if AutomationModel.move_slide(model, slide.id, 1) then save_automation_model() end
+      end
+      reaper.ImGui_EndPopup(ctx)
+    end
     for _, line_id in ipairs(slide.lineIds or {}) do
       local line = AutomationModel.get_line(model, line_id)
       if line then
         reaper.ImGui_TextColored(ctx, is_active_slide and HOLYRICS_MAPPED_GREEN or C.text_dim, line.displayId)
         reaper.ImGui_SameLine(ctx, 42)
         reaper.ImGui_TextWrapped(ctx, line.text)
+        if reaper.ImGui_BeginPopupContextItem(ctx, "##line_actions") then
+          if reaper.ImGui_MenuItem(ctx, "Editar texto") then
+            state.inline_lyric_edit_id = line.id
+            state.inline_lyric_focus_id = line.id
+          end
+          if not slide.isTitle and reaper.ImGui_MenuItem(ctx, "Mover para o slide anterior") then
+            local slide_index
+            for index, item in ipairs(model.slides) do if item.id == slide.id then slide_index = index; break end end
+            local previous = slide_index and model.slides[slide_index - 1]
+            if previous and not previous.isTitle and AutomationModel.move_line(model, line.id, previous.id) then save_automation_model() end
+          end
+          if not slide.isTitle and reaper.ImGui_MenuItem(ctx, "Mover para o próximo slide") then
+            local slide_index
+            for index, item in ipairs(model.slides) do if item.id == slide.id then slide_index = index; break end end
+            local next_slide = slide_index and model.slides[slide_index + 1]
+            if next_slide and AutomationModel.move_line(model, line.id, next_slide.id) then save_automation_model() end
+          end
+          reaper.ImGui_EndPopup(ctx)
+        end
       end
     end
     if is_active_slide then reaper.ImGui_PopStyleColor(ctx) end
@@ -3219,11 +3280,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
     -- disputar espaço com o mapa que é usado no dia a dia.
     local current_header_x = reaper.ImGui_GetCursorPosX(ctx)
     local header_width = current_header_x + reaper.ImGui_GetContentRegionAvail(ctx)
-    reaper.ImGui_SetCursorPos(ctx, math.max(0, header_width - 324), header_y)
-    if reaper.ImGui_Button(ctx, "EDITAR", 90, 26) then
-      manual_lyrics_editor:open(ctx, state.automation_model)
-    end
-    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetCursorPos(ctx, math.max(0, header_width - 226), header_y)
     if reaper.ImGui_Button(ctx, "ROUTE", 90, 26) then
       state.holyrics_editor_view = state.holyrics_editor_view == "ROUTE" and "SYNC" or "ROUTE"
     end
@@ -3241,18 +3298,6 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       end
     end
     reaper.ImGui_PopStyleVar(ctx)
-    manual_lyrics_editor:render(ctx, state.automation_model, function(draft)
-      local ok, path, warning = AutomationStore.save(draft, 0)
-      if not ok then return nil, path end
-      state.automation_model = draft
-      state.automation_import_text = draft.lyrics.source or ""
-      state.automation_title_artist = draft.lyrics.titleArtist or ""
-      state.automation_title_song = draft.lyrics.titleSong or ""
-      state.automation_error = nil
-      state.automation_export_path, state.automation_export_warning = path, warning
-      state.holyrics_remote_open = false
-      return true
-    end)
     reaper.ImGui_Separator(ctx)
     if state.automation_error then
       reaper.ImGui_TextColored(ctx, C.red, "Automação: " .. state.automation_error)
