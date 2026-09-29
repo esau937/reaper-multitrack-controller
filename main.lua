@@ -2691,8 +2691,6 @@ local function holyrics_post(action, payload, timeout, target)
   if token == "" or not token:match("^[%w_%-]+$") then
     return nil, "Informe um token válido do Holyrics."
   end
-  if not reaper.ExecProcess then return nil, "Esta versão do REAPER não possui o envio pela API." end
-
   local encoded = json.encode(payload or {})
   state.holyrics_request_sequence = (state.holyrics_request_sequence or 0) + 1
   local request_file = string.format("%s/holyrics-code-request-%d-%d.json",
@@ -2705,9 +2703,9 @@ local function holyrics_post(action, payload, timeout, target)
   local request_url = url:gsub("/$", "") .. "/api/" .. action .. "?token=" .. token
   local command = 'curl.exe -s -X POST -H "Content-Type: application/json" --data-binary @"' .. request_file
     .. '" --connect-timeout 2 "' .. request_url .. '" >NUL 2>&1'
-  -- `start /b` devolve o controle imediatamente. O curl continua em segundo
-  -- plano e o REAPER fica livre para processar o áudio no próximo frame.
-  local ok = pcall(reaper.ExecProcess, 'cmd.exe /d /c start "" /b ' .. command, 50)
+  -- Não use ExecProcess aqui: mesmo com timeout ele pode segurar o thread da
+  -- interface em alguns PCs. `start /b` cria o curl e retorna imediatamente.
+  local ok = pcall(os.execute, 'cmd.exe /d /c start "" /b ' .. command)
   if not ok then return nil, "Não foi possível iniciar o envio ao Holyrics." end
   return true
 end
@@ -3650,6 +3648,16 @@ local function loop()
       restore_ducking()
     end
   end
+
+  -- A automação continua sendo checada em todos os ciclos, mas a interface
+  -- pesada (waveform, mapas e prévias) é desenhada no máximo a 30 FPS. Isso
+  -- reduz bastante a carga do ReaImGui sem perder precisão nos cues.
+  local now = reaper.time_precise()
+  if state._next_ui_frame and now < state._next_ui_frame then
+    reaper.defer(loop)
+    return
+  end
+  state._next_ui_frame = now + (1 / 30)
 
   local rx, ry, rw, rh = 0, 0, 1920, 1080
   if reaper.JS_Window_GetRect then
