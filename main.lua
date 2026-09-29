@@ -172,7 +172,7 @@ local state = {
   sections         = {},
   setlist          = nil,
   pads = {
-    { name = "PAD", file = nil, playing = false, loop = true },
+    { name = "PAD", file = nil, playing = false, loop = true, volume = tonumber(reaper.GetExtState("MultitrackController", "pad_volume")) or 1.0 },
   },
   hold             = false,
   auto_next        = false,
@@ -197,9 +197,6 @@ local state = {
   lyrics_preview_transition_at = 0,
   code_api_server = reaper.GetExtState("MultitrackController", "code_api_server"),
   code_api_token = reaper.GetExtState("MultitrackController", "code_api_token"),
-  code_tcp_host = reaper.GetExtState("MultitrackController", "code_tcp_host"),
-  code_tcp_port = reaper.GetExtState("MultitrackController", "code_tcp_port"),
-  code_send_mode = reaper.GetExtState("MultitrackController", "code_send_mode") ~= "" and reaper.GetExtState("MultitrackController", "code_send_mode") or "API + TCP MIDI",
   code_api_status = nil,
   holyrics_remote_open = false,
   holyrics_remote_model = nil,
@@ -225,6 +222,7 @@ local state = {
   holyrics_window_h = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_h")) or 900,
   holyrics_window_x = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_x")),
   holyrics_window_y = tonumber(reaper.GetExtState("MultitrackController", "holyrics_window_y")),
+  scanner = { active = false, target_index = nil, ips = {}, total = 0, current = 0, found = {} },
   automation_model = nil,
   automation_import_text = "",
   automation_title_artist = "",
@@ -255,6 +253,19 @@ local state = {
   midi_map         = midi_map_state,
   DEFAULT_MIDI_MAP = DEFAULT_MIDI_MAP,
 }
+
+local function get_shifted_key()
+  local active_root = KeyDetect.get_root(state.current_key)
+  if not active_root then return nil end
+  local base_idx = nil
+  for i, k in ipairs(KeyDetect.CHROMATIC) do
+    if k == active_root then base_idx = i - 1; break end
+  end
+  if not base_idx then return nil end
+  local abs_semitones = base_idx + (state.pitch_offset or 0)
+  local new_idx = abs_semitones % 12
+  return KeyDetect.CHROMATIC[new_idx + 1]
+end
 
 local loaded_keys = reaper.GetExtState("MultitrackController", "key_mappings")
 if loaded_keys and loaded_keys ~= "" then
@@ -332,7 +343,7 @@ end
 
 local function get_note_name(pitch)
   local names = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
-  local octave = math.floor(pitch / 12) - 2 -- 36 is C1
+  local octave = math.floor(pitch / 12) - 1 -- 36 is C2
   return names[(pitch % 12) + 1] .. octave
 end
 
@@ -654,7 +665,23 @@ local function update_state()
     if is_new_proj then
       local pitch_state = state.pitch_projects[tostring(proj)]
       state.pitch_offset = pitch_state and pitch_state.offset or 0
+      
+      local pad = state.pads[1]
+      if pad and pad.playing then
+        Pads.play(pad, get_shifted_key())
+      end
+      
       import_mapa_if_empty(proj, proj_path)
+
+      state.holyrics_remote_open  = false
+      state.holyrics_remote_model = nil
+      state.holyrics_remote_status = { ok = false, message = 'Sessao reiniciada. Aperte Play para sincronizar.' }
+
+      state.cue_engine = CueEngine.new()
+
+      local saved_automation, automation_load_error = AutomationStore.load(0)
+      state.automation_model = saved_automation
+      state.automation_error  = automation_load_error
     end
     
     state.sections = Sections.get_from_project(proj)
@@ -751,6 +778,25 @@ local function render_key_mapping_modal(ctx, win_x, win_y, win_w, win_h)
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
     reaper.ImGui_EndPopup(ctx)
+  end
+end
+
+local function draw_gear_icon(draw_list, cx, cy, color, r)
+  r = r or 6
+  reaper.ImGui_DrawList_AddCircle(draw_list, cx, cy, r * 0.45, color, 12, 2.0)
+  local teeth = 6
+  for i = 0, teeth - 1 do
+    local a = (i / teeth) * math.pi * 2
+    local dx1, dy1 = math.cos(a - 0.25), math.sin(a - 0.25)
+    local dx2, dy2 = math.cos(a + 0.25), math.sin(a + 0.25)
+    local r1 = r * 0.65
+    local r2 = r
+    reaper.ImGui_DrawList_AddQuadFilled(draw_list, 
+      cx + dx1 * r1, cy + dy1 * r1,
+      cx + dx2 * r1, cy + dy2 * r1,
+      cx + dx2 * r2, cy + dy2 * r2,
+      cx + dx1 * r2, cy + dy1 * r2,
+      color)
   end
 end
 
@@ -1055,12 +1101,17 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     
     -- ==== MÁQUINA DE TOM (Top Half) ====
     local btn_h = 36
-    -- Nova largura apenas com o bloco de tom: 22 (-) + 4 (gap) + 54 (B) + 4 (gap) + 22 (+) = 106
-    local widget_w = 22 + 4 + 54 + 4 + 22
+    -- Largura original do bloco de tom: 22 (-) + 4 (gap) + 54 (B) + 4 (gap) + 22 (+) = 106
+    local pitch_widget_w = 22 + 4 + 54 + 4 + 22
+    local fader_pad_w = 120
+    local fader_gap = 16
+    local gear_w = 18
+    local gear_gap = 8
+    local total_widget_w = pitch_widget_w + fader_gap + fader_pad_w + gear_gap + gear_w
     local panel_y = draw_y + (total_h - btn_h) / 2
     
     -- Centralizado acima das teclas cromáticas
-    local px = start_x + (total_w - widget_w) / 2
+    local px = start_x + (total_w - total_widget_w) / 2
     
     reaper.ImGui_SetCursorScreenPos(ctx, px, panel_y)
     
@@ -1121,6 +1172,62 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     if reaper.ImGui_Button(ctx, "##plus", 22, btn_h) then shift_pitch(1) end
     reaper.ImGui_DrawList_AddLine(draw_list, cx2 + 6, cy2 + (btn_h/2), cx2 + 16, cy2 + (btn_h/2), 0xFFFFFFFF, 2.0)
     reaper.ImGui_DrawList_AddLine(draw_list, cx2 + 11, cy2 + (btn_h/2)-5, cx2 + 11, cy2 + (btn_h/2)+5, 0xFFFFFFFF, 2.0)
+    
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleColor(ctx, 3)
+
+    -- Fader de Volume do PAD
+    reaper.ImGui_SameLine(ctx, 0, fader_gap)
+    local pad = state.pads[1]
+    
+    -- Padronizando visual para combinar com os botões (escuro e rosa)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x333333FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x555555FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x444444FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_SliderGrab(), C.accent)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_SliderGrabActive(), C.accent_hover)
+    
+    -- Ajusta altura e centraliza verticalmente em relação ao botão de 36px
+    -- Padding(4, 2) faz com que a altura do fader seja FontSize(14) + 4 = 18px
+    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) + 9)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 4.0, 2.0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_GrabRounding(), 12.0)
+
+    reaper.ImGui_PushItemWidth(ctx, fader_pad_w)
+    local display_vol = math.floor((pad.volume or 1.0) * 100 + 0.5)
+    local changed_padvol, new_display = reaper.ImGui_SliderInt(ctx, "##padvol_bottom", display_vol, 0, 100, "%d")
+    if changed_padvol then
+      local real_vol = new_display / 100.0
+      Pads.set_volume(pad, real_vol)
+      reaper.SetExtState("MultitrackController", "pad_volume", tostring(real_vol), true)
+    end
+    reaper.ImGui_PopItemWidth(ctx)
+    if reaper.ImGui_IsItemHovered(ctx) then reaper.ImGui_SetTooltip(ctx, "Volume do PAD") end
+
+    reaper.ImGui_PopStyleVar(ctx, 3)
+    reaper.ImGui_PopStyleColor(ctx, 5)
+
+    -- Botão Engrenagem (Roteamento do Pad)
+    reaper.ImGui_SameLine(ctx, 0, gear_gap)
+    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) + 9)
+    
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x333333FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x555555FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), C.accent)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
+    
+    -- Usando desenho vetorial manual pois a fonte atual (Arial) não possui glifos de engrenagem
+    -- Altura do fader é 18px (FontSize(14) + padding(4)). Então usamos 18x18
+    local gear_h = 18
+    if reaper.ImGui_Button(ctx, "##pad_route", gear_w, gear_h) then
+       Pads.show_routing(pad)
+    end
+    local btn_min_x, btn_min_y = reaper.ImGui_GetItemRectMin(ctx)
+    local btn_max_x, btn_max_y = reaper.ImGui_GetItemRectMax(ctx)
+    -- Ajustamos o raio no desenho vetorial dinamicamente (18/2 = 9, então r=5)
+    draw_gear_icon(draw_list, (btn_min_x + btn_max_x) / 2, (btn_min_y + btn_max_y) / 2, 0xFFFFFFFF, 5)
+    if reaper.ImGui_IsItemHovered(ctx) then reaper.ImGui_SetTooltip(ctx, "Configurar Roteamento do Pad") end
     
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleColor(ctx, 3)
@@ -1195,84 +1302,12 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   push_btn_style()
   if reaper.ImGui_Button(ctx, "MIDI", marker_w, marker_h) then
     reaper.ImGui_OpenPopup(ctx, "MidiActionsPopup")
-  elseif false then
-    -- Kept only as a future reference for the old region-note generator.
-    local target_tr = nil
-    local num_tracks = reaper.CountTracks(0)
-    for i = 0, num_tracks - 1 do
-      local tr = reaper.GetTrack(0, i)
-      local _, name = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
-      if name == "MIDI" then
-        target_tr = tr
-        break
-      end
-    end
-    
-    if not target_tr then
-      reaper.InsertTrackAtIndex(num_tracks, true)
-      target_tr = reaper.GetTrack(0, num_tracks)
-      reaper.GetSetMediaTrackInfo_String(target_tr, "P_NAME", "MIDI", true)
-    end
-    
-    local midi_item = nil
-    if reaper.CountTrackMediaItems(target_tr) > 0 then
-      midi_item = reaper.GetTrackMediaItem(target_tr, 0)
-    else
-      local proj_len = reaper.GetProjectLength(0)
-      if proj_len <= 0 then proj_len = 300 end
-      midi_item = reaper.CreateNewMIDIItemInProj(target_tr, 0, proj_len, false)
-    end
-    
-    if midi_item then
-      local take = reaper.GetActiveTake(midi_item)
-      if take and reaper.TakeIsMIDI(take) then
-        -- Limpa notas existentes para não duplicar se clicar de novo
-        local _, notecnt = reaper.MIDI_CountEvts(take)
-        for j = notecnt - 1, 0, -1 do
-          reaper.MIDI_DeleteNote(take, j)
-        end
-        
-        -- Usa o MIDI Mapping salvo nas configurações
-        local idx = 0
-        while true do
-          local retval, isrgn, pos, rgnend, name, markrgnindexnumber = reaper.EnumProjectMarkers2(0, idx)
-          if retval == 0 then break end
-          
-          if isrgn and name and name ~= "" then
-            -- Remove números no começo (ex: "1 Verso" -> "Verso") e ajusta maiúsculas
-            local clean_name = name:match("^%d+[%.-_]?%s*(.+)") or name
-            clean_name = clean_name:gsub("^%l", string.upper)
-            
-            -- Pega do mapping associado ao Maker ou cai para um default fixo
-            local pitch = 36
-            for _, sec in ipairs(user_sections) do
-              if string.upper(sec.name) == string.upper(clean_name) then
-                pitch = sec.pitch
-                break
-              end
-            end 
-            
-            -- Converte tempo do projeto (segundos) para PPQ (ticks MIDI)
-            local start_ppq = reaper.MIDI_GetPPQPosFromProjTime(take, pos)
-            -- Nota curta funcionando apenas como trigger (480 PPQ)
-            local end_ppq = start_ppq + 480 
-            
-            reaper.MIDI_InsertNote(take, false, false, start_ppq, end_ppq, 0, pitch, 100, true)
-          end
-          idx = idx + 1
-        end
-        
-        reaper.MIDI_Sort(take)
-        reaper.UpdateArrange()
-      end
-    end
   end
   pop_btn_style()
   reaper.ImGui_SetNextWindowSizeConstraints(ctx, 190, 0, 9999, 9999)
   if reaper.ImGui_BeginPopup(ctx, "MidiActionsPopup") then
     if reaper.ImGui_Selectable(ctx, "MIDI Mapping", false, 0, 0, 26) then
-      state.show_holyrics_modal = true
-      state.holyrics_editor_view = "SYNC"
+      state.show_midi_mapping_modal = true
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
     if reaper.ImGui_Selectable(ctx, "Lyrics Preview", false, 0, 0, 26) then
@@ -1688,6 +1723,12 @@ function shift_pitch(semitones)
   
   project_state.offset = project_state.offset + semitones
   state.pitch_offset = project_state.offset
+  
+  local pad = state.pads[1]
+  if pad and pad.playing then
+    Pads.play(pad, get_shifted_key())
+  end
+
   reaper.UpdateArrange()
   reaper.Undo_EndBlock2(proj, "Multitrack Controller: transpor tom", -1)
   reaper.PreventUIRefresh(-1)
@@ -1699,6 +1740,12 @@ reset_pitch = function()
   reaper.Undo_BeginBlock2(project_state.proj)
   restore_project_pitch(project_state)
   state.pitch_offset = 0
+  
+  local pad = state.pads[1]
+  if pad and pad.playing then
+    Pads.play(pad, get_shifted_key())
+  end
+
   reaper.UpdateArrange()
   reaper.Undo_EndBlock2(project_state.proj, "Multitrack Controller: restaurar tom original", -1)
 end
@@ -1973,18 +2020,10 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   local sname = state.current_proj_name:gsub("%.[Rr][Pp][Pp]$","")
   local cover_size = 38
 
-  -- Capa detectada na pasta do projeto. Clique em CAPA para trocar a imagem
-  -- quando o arquivo baixado tiver mais de uma figura.
-  if state.cover_image then
-    reaper.ImGui_SetCursorScreenPos(ctx, x, y)
-    reaper.ImGui_Image(ctx, state.cover_image, cover_size, cover_size)
-  else
-    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
-    reaper.ImGui_DrawList_AddRect(draw_list, x, y, x + cover_size, y + cover_size, C.border, 4.0, 0, 1.0)
-    reaper.ImGui_DrawList_AddText(draw_list, x + 7, y + 12, C.text_dim, "CAPA")
-  end
-  x = x + cover_size + 8
-  
+  -- RECURSO FUTURO: Exibição de Capa do Álbum
+  -- se state.cover_image então ... etc
+  -- x = x + cover_size + 8
+
   -- Título centralizado verticalmente (ajustado para a fonte maior)
   local title_y_offset = (top_h / 2) - 9
   
@@ -1995,11 +2034,9 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   reaper.ImGui_PopFont(ctx)
   reaper.ImGui_PopStyleColor(ctx)
 
-  local title_w = reaper.ImGui_CalcTextSize(ctx, sname)
-  reaper.ImGui_SetCursorScreenPos(ctx, x + title_w + 10, y + 6)
-  push_btn_style()
-  if reaper.ImGui_Button(ctx, "CAPA", 46, bh - 12) then choose_project_cover() end
-  pop_btn_style()
+  -- RECURSO FUTURO: Botão de Trocar Capa
+  -- local title_w = reaper.ImGui_CalcTextSize(ctx, sname)
+  -- ...
 
   -- ─── CENTRO: HOLD + LOOP + Transporte + PAD + CLICK ───
   local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
@@ -2102,12 +2139,12 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   else
     push_btn_style()
   end
-  if reaper.ImGui_Button(ctx, "PAD", pad_w, bh) then Pads.toggle(pad, state.current_key) end
-  handle_mapped_button(ctx, "PAD", function() Pads.toggle(pad, state.current_key) end, function()
+  if reaper.ImGui_Button(ctx, "PAD", pad_w, bh) then Pads.toggle(pad, get_shifted_key()) end
+  handle_mapped_button(ctx, "PAD", function() Pads.toggle(pad, get_shifted_key()) end, function()
       if reaper.ImGui_Selectable(ctx, "Configurar Pad Manualmente") then Pads.configure(pad) end
   end)
   if pad_playing then reaper.ImGui_PopStyleColor(ctx, 2) else pop_btn_style() end
-
+  
   -- CLICK
   local is_click = is_click_active()
   reaper.ImGui_SetCursorScreenPos(ctx, center_x + 452, y)
@@ -2161,55 +2198,7 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
     pop_btn_style()
   end
 
-  -- ── Menus à direita (Canto Superior Direito) ──
-  local menu_items = {}
-
-  local total_menu_w = 0
-  for _, item in ipairs(menu_items) do total_menu_w = total_menu_w + item.w + 4 end
-  local menu_x = win_x + win_w - total_menu_w - 4
-
-  local pending_action = nil
-  for i = #menu_items, 1, -1 do
-    local item = menu_items[i]
-    reaper.ImGui_SetCursorScreenPos(ctx, menu_x, y)
-    
-    local active = item.is_active and item.is_active()
-    if active then
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), C.green)
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), C.green_hover)
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), C.btn_active)
-    else
-      push_btn_style()
-    end
-    
-    if reaper.ImGui_Button(ctx, item.label, item.w, bh) then 
-      pending_action = item.action 
-    end
-    
-    -- Desenha o ícone vetorial se for o botão de opções
-    if item.icon == "dots_v" then
-      local mx, my = reaper.ImGui_GetItemRectMin(ctx)
-      local Mx, My = reaper.ImGui_GetItemRectMax(ctx)
-      local cx, cy = (mx + Mx) / 2, (my + My) / 2
-      local dot_r = 2.0
-      local space = 7
-      reaper.ImGui_DrawList_AddCircleFilled(draw_list, cx, cy - space, dot_r, C.text)
-      reaper.ImGui_DrawList_AddCircleFilled(draw_list, cx, cy,         dot_r, C.text)
-      reaper.ImGui_DrawList_AddCircleFilled(draw_list, cx, cy + space, dot_r, C.text)
-    end
-    
-    if active then
-      reaper.ImGui_PopStyleColor(ctx, 3)
-    else
-      pop_btn_style()
-    end
-    
-    menu_x = menu_x + item.w + 4
-  end
-
   reaper.ImGui_PopStyleVar(ctx) -- Restaura o arredondamento padrão
-
-  if pending_action then pending_action() end
 end
 
 local function render_midi_mapping_modal(ctx, win_x, win_y, win_w, win_h)
@@ -2249,358 +2238,6 @@ local function render_midi_mapping_modal(ctx, win_x, win_y, win_w, win_h)
   end
   reaper.ImGui_PopStyleColor(ctx, 1)
   reaper.ImGui_PopStyleVar(ctx, 2)
-end
-local function process_holyrics(text, proj_regions)
-  local lines = {}
-  text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
-  for line in text:gmatch("([^\n]*)\n?") do
-    table.insert(lines, line)
-  end
-  
-  local text_sections = {}
-  local current_section_name = "SEM SEÇÃO"
-  local current_section_lines = {}
-  
-  local function flush_section()
-    if #current_section_lines > 0 then
-      local slides = {}
-      local current_slide = {}
-      for _, l in ipairs(current_section_lines) do
-        table.insert(current_slide, l)
-        if #current_slide >= state.holyrics_lines_per_slide then
-          table.insert(slides, current_slide)
-          current_slide = {}
-        end
-      end
-      if #current_slide > 0 then
-        table.insert(slides, current_slide)
-      end
-      table.insert(text_sections, {name = current_section_name, slides = slides})
-      current_section_lines = {}
-    end
-  end
-
-  for _, line in ipairs(lines) do
-    local s = line:match("^%s*%[([^%]]+)%]%s*$")
-    if s then
-      flush_section()
-      current_section_name = string.upper(s)
-    else
-      local content = line:match("^%s*(.-)%s*$")
-      if content and content ~= "" then
-        table.insert(current_section_lines, content)
-      end
-    end
-  end
-  flush_section()
-  
-  local unique_slides = {}
-  local function get_slide_id(slide_lines)
-    local t = table.concat(slide_lines, "\n")
-    for i, ex in ipairs(unique_slides) do
-      if table.concat(ex, "\n") == t then return i end
-    end
-    table.insert(unique_slides, slide_lines)
-    return #unique_slides
-  end
-  
-  local text_queues = {}
-  for _, sec in ipairs(text_sections) do
-    local ids = {}
-    for _, slide in ipairs(sec.slides) do
-      table.insert(ids, get_slide_id(slide))
-    end
-    if not text_queues[sec.name] then text_queues[sec.name] = {} end
-    table.insert(text_queues[sec.name], ids)
-  end
-  
-  state.holyrics_slides = unique_slides
-  
-  local no_lyrics = {["CONTAGEM"]=true, ["INTRODUÇÃO"]=true, ["INTRO"]=true, ["SOLO"]=true, ["SAÍDA"]=true, ["FINAL"]=true, ["PAUSA"]=true, ["TURNAROUND"]=true, ["INTERLÚDIO"]=true}
-  local cursors = {}
-  
-  local new_mapping = {}
-  for i, rgn in ipairs(proj_regions or {}) do
-    local clean_name = string.upper(rgn.name:match("^%d+[%.-_]?%s*(.+)") or rgn.name)
-    
-    local manual_match = nil
-    if state.holyrics_mapping then
-      for _, old_m in ipairs(state.holyrics_mapping) do
-        if old_m.pos == rgn.pos and old_m.name == rgn.name and old_m.manual then
-          manual_match = old_m
-          break
-        end
-      end
-    end
-    
-    if manual_match then
-      table.insert(new_mapping, {name = rgn.name, pos = rgn.pos, slide_ids = manual_match.slide_ids, manual = true})
-    else
-      local assigned_ids = {}
-      if not no_lyrics[clean_name] then
-         local q = text_queues[clean_name]
-         if not q then
-            for k, v in pairs(text_queues) do
-               if clean_name:find(k) or k:find(clean_name) then q = v; clean_name = k; break end
-            end
-         end
-         if q then
-            cursors[clean_name] = (cursors[clean_name] or 0) + 1
-            local s_ids = q[cursors[clean_name]] or q[#q]
-            for _, id in ipairs(s_ids) do table.insert(assigned_ids, id) end
-         end
-      end
-      table.insert(new_mapping, {name = rgn.name, pos = rgn.pos, slide_ids = assigned_ids, manual = false})
-    end
-  end
-  
-  state.holyrics_mapping = new_mapping
-  return text_sections
-end
-
-local function cleanup_empty_slides()
-  for i = #state.holyrics_slides, 1, -1 do
-    if #state.holyrics_slides[i] == 0 and not state.holyrics_slides[i].keep_empty then
-      table.remove(state.holyrics_slides, i)
-      if state.holyrics_mapping then
-        for _, m in ipairs(state.holyrics_mapping) do
-          local new_ids = {}
-          for _, id in ipairs(m.slide_ids) do
-            if id < i then table.insert(new_ids, id)
-            elseif id > i then table.insert(new_ids, id - 1)
-            end
-          end
-          m.slide_ids = new_ids
-        end
-      end
-    end
-  end
-end
-
-local function move_lyric_line(s_idx, l_idx, dir)
-  local slide = state.holyrics_slides[s_idx]
-  
-  if dir == -1 then -- UP
-    if s_idx > 1 then
-      local prev_slide = state.holyrics_slides[s_idx - 1]
-      local to_move = {}
-      for i = 1, l_idx do
-        table.insert(to_move, slide[i])
-      end
-      for _, line in ipairs(to_move) do
-        table.insert(prev_slide, line)
-      end
-      for i = 1, l_idx do
-        table.remove(slide, 1)
-      end
-    end
-  elseif dir == 1 then -- DOWN
-    local to_move = {}
-    for i = l_idx, #slide do
-      table.insert(to_move, slide[i])
-    end
-    for i = #slide, l_idx, -1 do
-      table.remove(slide, i)
-    end
-    
-    if s_idx < #state.holyrics_slides then
-      local next_slide = state.holyrics_slides[s_idx + 1]
-      for i = #to_move, 1, -1 do
-        table.insert(next_slide, 1, to_move[i])
-      end
-    else
-      table.insert(state.holyrics_slides, to_move)
-    end
-  end
-  
-  cleanup_empty_slides()
-end
-
-local function render_automation_lyrics_editor(ctx)
-  local model = state.automation_model
-  if state.automation_import_text == "" and model and model.lyrics.source then
-    state.automation_import_text = model.lyrics.source
-  elseif state.automation_import_text == "" and model then
-    local lines = {}
-    for _, line in ipairs(model.lyrics.lines) do table.insert(lines, line.text) end
-    state.automation_import_text = table.concat(lines, "\n")
-  end
-  if model and state.automation_title_artist == "" then
-    state.automation_title_artist = model.lyrics.titleArtist or ""
-    state.automation_title_song = model.lyrics.titleSong or ""
-  end
-
-  local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
-  local column_w = (available_w - 8) / 2
-  reaper.ImGui_BeginChild(ctx, "##pure_lyrics", column_w, available_h, true)
-  reaper.ImGui_Text(ctx, "LETRA PURA")
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Cole ou edite a letra aqui.")
-  reaper.ImGui_Separator(ctx)
-  local changed, text = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics_source", state.automation_import_text, -1, -76)
-  if changed then state.automation_import_text = text end
-  reaper.ImGui_Text(ctx, "LT - TÍTULO")
-  reaper.ImGui_SetNextItemWidth(ctx, -170)
-  local artist_changed, artist = reaper.ImGui_InputText(ctx, "##title_artist", state.automation_title_artist)
-  if artist_changed then state.automation_title_artist = artist end
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, -76)
-  local song_changed, song = reaper.ImGui_InputText(ctx, "##title_song", state.automation_title_song)
-  if song_changed then state.automation_title_song = song end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "LT", 64, 0) and model then
-    local title_line, err = AutomationModel.set_title_line(model, state.automation_title_artist, state.automation_title_song)
-    if title_line then save_automation_model() else state.automation_error = err end
-  end
-  reaper.ImGui_Text(ctx, "Linhas por slide")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 60)
-  if reaper.ImGui_BeginCombo(ctx, "##automation_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
-    for _, option in ipairs({"1", "2", "3", "4"}) do
-      if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
-        state.holyrics_lines_per_slide = tonumber(option)
-        reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
-      end
-    end
-    reaper.ImGui_EndCombo(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "PROCESSAR LETRA", 160, 28) then
-    if model and #model.lyrics.lines > 0 then
-      reaper.ImGui_OpenPopup(ctx, "Confirmar nova letra")
-    else
-      state.automation_model = AutomationModel.import_text(state.automation_import_text, state.holyrics_lines_per_slide)
-      if state.automation_title_artist:match("%S") or state.automation_title_song:match("%S") then
-        AutomationModel.set_title_line(state.automation_model, state.automation_title_artist, state.automation_title_song)
-      end
-      save_automation_model()
-    end
-  end
-  reaper.ImGui_EndChild(ctx)
-
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##generated_lines", 0, available_h, true)
-  reaper.ImGui_Text(ctx, "LINHAS GERADAS")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "IDs permanentes")
-  reaper.ImGui_Separator(ctx)
-  if not model then
-    reaper.ImGui_TextDisabled(ctx, "Clique em PROCESSAR LETRA para gerar L1, L2, L3...")
-  else
-    for _, line in ipairs(model.lyrics.lines) do
-      reaper.ImGui_PushID(ctx, line.id)
-      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, line.displayId)
-      reaper.ImGui_SameLine(ctx, 54)
-      reaper.ImGui_SetNextItemWidth(ctx, -1)
-      local line_changed, line_text = reaper.ImGui_InputText(ctx, "##text", line.text)
-      if line_changed then
-        line.text = line_text
-        save_automation_model()
-      end
-      reaper.ImGui_PopID(ctx)
-    end
-  end
-  reaper.ImGui_EndChild(ctx)
-
-  if reaper.ImGui_BeginPopupModal(ctx, "Confirmar nova letra", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
-    reaper.ImGui_TextWrapped(ctx, "Processar uma nova letra recriará linhas, slides e cues desta música. Continuar?")
-    if reaper.ImGui_Button(ctx, "PROCESSAR", 120, 0) then
-      state.automation_model = AutomationModel.import_text(state.automation_import_text, state.holyrics_lines_per_slide)
-      if state.automation_title_artist:match("%S") or state.automation_title_song:match("%S") then
-        AutomationModel.set_title_line(state.automation_model, state.automation_title_artist, state.automation_title_song)
-      end
-      state.automation_selected_slide_id = nil
-      state.cue_engine = CueEngine.new()
-      save_automation_model()
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "CANCELAR", 120, 0) then reaper.ImGui_CloseCurrentPopup(ctx) end
-    reaper.ImGui_EndPopup(ctx)
-  end
-end
-
-local function render_automation_slides_editor(ctx)
-  local model = state.automation_model
-  if not model then
-    reaper.ImGui_TextDisabled(ctx, "Gere as linhas na aba LETRA antes de organizar os slides.")
-    return
-  end
-  reaper.ImGui_Text(ctx, "SLIDES")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Use as setas para reorganizar sem renumerar L1, L2...")
-  reaper.ImGui_Separator(ctx)
-  reaper.ImGui_BeginChild(ctx, "##automation_slides", 0, -40, true)
-  for slide_index, slide in ipairs(model.slides) do
-    reaper.ImGui_PushID(ctx, slide.id)
-    reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, slide.displayId)
-    reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_Text(ctx, "SLIDE " .. string.format("%02d", slide_index))
-    reaper.ImGui_Separator(ctx)
-    for line_index, line_id in ipairs(slide.lineIds) do
-      local line = AutomationModel.get_line(model, line_id)
-      if line then
-        reaper.ImGui_PushID(ctx, line.id)
-        reaper.ImGui_TextColored(ctx, C.text_dim, line.displayId)
-        reaper.ImGui_SameLine(ctx, 48)
-        reaper.ImGui_Text(ctx, line.text)
-        reaper.ImGui_SameLine(ctx, -112)
-        if reaper.ImGui_Button(ctx, "^", 24, 0) then
-          if AutomationModel.move_line_within_slide(model, line.id, slide.id, -1) then save_automation_model() end
-        end
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_Button(ctx, "v", 24, 0) then
-          if AutomationModel.move_line_within_slide(model, line.id, slide.id, 1) then save_automation_model() end
-        end
-        reaper.ImGui_SameLine(ctx)
-        if slide_index > 1 and reaper.ImGui_Button(ctx, "<", 24, 0) then
-          if AutomationModel.move_line(model, line.id, model.slides[slide_index - 1].id) then save_automation_model() end
-        end
-        reaper.ImGui_SameLine(ctx)
-        if slide_index < #model.slides and reaper.ImGui_Button(ctx, ">", 24, 0) then
-          if AutomationModel.move_line(model, line.id, model.slides[slide_index + 1].id) then save_automation_model() end
-        end
-        reaper.ImGui_PopID(ctx)
-      end
-    end
-    if #slide.lineIds == 0 then reaper.ImGui_TextDisabled(ctx, "[Slide vazio]") end
-    reaper.ImGui_Dummy(ctx, 0, 8)
-    reaper.ImGui_PopID(ctx)
-  end
-  reaper.ImGui_EndChild(ctx)
-  reaper.ImGui_Text(ctx, "LINHAS POR SLIDE")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 60)
-  if reaper.ImGui_BeginCombo(ctx, "##slides_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
-    for _, option in ipairs({"1", "2", "3", "4"}) do
-      if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
-        state.holyrics_lines_per_slide = tonumber(option)
-        reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
-      end
-    end
-    reaper.ImGui_EndCombo(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "APLICAR", 90, 28) then
-    reaper.ImGui_OpenPopup(ctx, "Confirmar reorganização dos slides")
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "+ NOVO SLIDE", 150, 28) then
-    AutomationModel.add_slide(model)
-    save_automation_model()
-  end
-
-  if reaper.ImGui_BeginPopupModal(ctx, "Confirmar reorganização dos slides", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
-    reaper.ImGui_TextWrapped(ctx, "As linhas serão redistribuídas com a nova quantidade por slide. Os IDs L1, L2... serão preservados, mas os cues atuais continuarão ligados aos mesmos slides.")
-    if reaper.ImGui_Button(ctx, "APLICAR", 100, 0) then
-      AutomationModel.reflow_slides(model, state.holyrics_lines_per_slide)
-      state.automation_error = nil
-      save_automation_model()
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "CANCELAR", 100, 0) then reaper.ImGui_CloseCurrentPopup(ctx) end
-    reaper.ImGui_EndPopup(ctx)
-  end
 end
 
 local function format_cue_time(seconds)
@@ -2670,6 +2307,56 @@ local function render_visual_click(ctx, position, is_playing)
   end
   reaper.ImGui_Button(ctx, metro_text .. "##sync_visual_click", 42, 24)
   if is_playing then reaper.ImGui_PopStyleColor(ctx, 4) else pop_btn_style() end
+end
+
+local function start_network_scan(target_index)
+  if not reaper.ExecProcess then return false, "Incompatível" end
+  local ok, output = pcall(reaper.ExecProcess, "arp -a", 1000)
+  if not ok or not output then return false, "Falha arp" end
+  
+  local ips = {}
+  for ip in output:gmatch("%s+(192%.168%.%d+%.%d+)%s+") do
+    if not ip:match("%.255$") then table.insert(ips, ip) end
+  end
+  for ip in output:gmatch("%s+(10%.%d+%.%d+%.%d+)%s+") do
+    if not ip:match("%.255$") then table.insert(ips, ip) end
+  end
+  
+  if #ips == 0 then return false, "Vazio" end
+  
+  state.scanner = {
+    active = true,
+    show_modal = true,
+    finished = false,
+    target_index = target_index,
+    ips = ips,
+    total = #ips,
+    current = 0,
+    found = {}
+  }
+  return true, nil
+end
+
+local function process_network_scan()
+  if not state.scanner.active then return end
+  
+  if #state.scanner.ips > 0 then
+    local ip = table.remove(state.scanner.ips, 1)
+    state.scanner.current = state.scanner.current + 1
+    
+    local request_url = "http://" .. ip .. ":8091/api/GetThemes?token=SCAN"
+    local tok, tout = pcall(reaper.ExecProcess, 'curl.exe -s -X POST -H "Content-Type: application/json" -m 1 "' .. request_url .. '" -d "{}"', 1200)
+    if tok and tout then
+      tout = tostring(tout)
+      if tout:match("invalid token") or tout:match("unauthorized") or tout:match('"status"') or tout:match("%{%}") then
+        table.insert(state.scanner.found, "http://" .. ip .. ":8091")
+      end
+    end
+  else
+    -- Done
+    state.scanner.active = false
+    state.scanner.finished = true
+  end
 end
 
 local function test_route_api(url, token)
@@ -2772,7 +2459,76 @@ local function send_holyrics_line(cue)
   }
 end
 
+local function draw_status_badge(ctx, id, status)
+  if not status or not status.message or status.message == "" then return end
+  local bg_color = status.ok and 0x05966933 or 0xDC262633
+  local text_color = status.ok and 0x34D399FF or 0xF87171FF
+  
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), bg_color)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), 0x00000000)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 6.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 12.0, 6.0)
+  
+  -- Calcular a largura do texto para o tamanho da badge
+  local text_w = reaper.ImGui_CalcTextSize(ctx, status.message)
+  
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) - 2)
+  reaper.ImGui_BeginChild(ctx, "badge_" .. id, text_w + 24, 28, true, reaper.ImGui_WindowFlags_NoScrollbar())
+  reaper.ImGui_TextColored(ctx, text_color, status.message)
+  reaper.ImGui_EndChild(ctx)
+  
+  reaper.ImGui_PopStyleVar(ctx, 2)
+  reaper.ImGui_PopStyleColor(ctx, 2)
+end
+
 local function render_route_editor(ctx)
+  if state.scanner and state.scanner.show_modal then
+    reaper.ImGui_OpenPopup(ctx, "Scanner de Rede")
+    state.scanner.show_modal = false
+  end
+
+  -- Modal do Scanner
+  local center_x = reaper.ImGui_GetWindowPos(ctx) + reaper.ImGui_GetWindowSize(ctx) * 0.5
+  local center_y = select(2, reaper.ImGui_GetWindowPos(ctx)) + select(2, reaper.ImGui_GetWindowSize(ctx)) * 0.5
+  reaper.ImGui_SetNextWindowPos(ctx, center_x, center_y, reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
+  
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ModalWindowDimBg(), 0x00000001)
+  if reaper.ImGui_BeginPopupModal(ctx, "Scanner de Rede", nil, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+    if state.scanner.active then
+      reaper.ImGui_Text(ctx, "Buscando o Holyrics na rede local...")
+      reaper.ImGui_Dummy(ctx, 0, 10)
+      local progress = state.scanner.total > 0 and (state.scanner.current / state.scanner.total) or 0
+      reaper.ImGui_ProgressBar(ctx, progress, 300, 20, string.format("%d / %d IPs verificados", state.scanner.current, state.scanner.total))
+    elseif state.scanner.finished then
+      if #state.scanner.found == 0 then
+        reaper.ImGui_TextColored(ctx, C.red, "Nenhum Holyrics foi encontrado.")
+        reaper.ImGui_Text(ctx, "Certifique-se de que o Holyrics está aberto e o 'API Server' está iniciado.")
+        reaper.ImGui_Dummy(ctx, 0, 10)
+        if reaper.ImGui_Button(ctx, "Fechar", 100, 0) then reaper.ImGui_CloseCurrentPopup(ctx) end
+      else
+        reaper.ImGui_Text(ctx, "Selecione o Holyrics desejado:")
+        reaper.ImGui_Dummy(ctx, 0, 10)
+        
+        local target = state.code_api_targets[state.scanner.target_index]
+        for _, ip_url in ipairs(state.scanner.found) do
+          if reaper.ImGui_Button(ctx, "CONECTAR A " .. ip_url, 300, 30) then
+            if target then
+              target.url = ip_url
+              target.status = nil -- Clear status to remove inline green text
+              save_holyrics_targets()
+            end
+            reaper.ImGui_CloseCurrentPopup(ctx)
+          end
+        end
+        reaper.ImGui_Dummy(ctx, 0, 10)
+        if reaper.ImGui_Button(ctx, "Cancelar", 100, 0) then reaper.ImGui_CloseCurrentPopup(ctx) end
+      end
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+  reaper.ImGui_PopStyleColor(ctx)
+
   reaper.ImGui_Text(ctx, "ROUTE")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Conexão da automação")
@@ -2785,82 +2541,124 @@ local function render_route_editor(ctx)
   local remove_index = nil
   for index, target in ipairs(state.code_api_targets or {}) do
     reaper.ImGui_PushID(ctx, index)
-    reaper.ImGui_SetNextItemWidth(ctx, 130)
-    local name_changed, name = reaper.ImGui_InputText(ctx, "Nome", target.name or ("Holyrics " .. index))
-    reaper.ImGui_SameLine(ctx)
+    
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), 0x1A1A1AFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), 0x333333FF)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 8.0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 16.0, 16.0)
+    
+    reaper.ImGui_BeginChild(ctx, "card_"..index, 0, 110, true)
+    
+    -- Labels
+    reaper.ImGui_TextColored(ctx, 0xAAAAAAFF, "NOME DA CONEXÃO")
+    reaper.ImGui_SameLine(ctx, 150)
+    reaper.ImGui_TextColored(ctx, 0xAAAAAAFF, "URL / IP (ex: http://192.168.1.5:8091)")
+    reaper.ImGui_SameLine(ctx, 430)
+    reaper.ImGui_TextColored(ctx, 0xAAAAAAFF, "TOKEN DE ACESSO")
+    
+    -- Inputs
+    reaper.ImGui_SetNextItemWidth(ctx, 120)
+    local name_changed, name = reaper.ImGui_InputText(ctx, "##Nome", target.name or ("Holyrics " .. index))
+    reaper.ImGui_SameLine(ctx, 150)
+    
     reaper.ImGui_SetNextItemWidth(ctx, 260)
-    local url_changed, url = reaper.ImGui_InputText(ctx, "Endereço", target.url or "")
-    reaper.ImGui_SameLine(ctx)
+    local url_changed, url = reaper.ImGui_InputText(ctx, "##Endereço", target.url or "")
+    reaper.ImGui_SameLine(ctx, 430)
+    
     reaper.ImGui_SetNextItemWidth(ctx, 220)
-    local token_changed, token = reaper.ImGui_InputText(ctx, "Token", target.token or "", password_flag)
+    local token_changed, token = reaper.ImGui_InputText(ctx, "##Token", target.token or "", password_flag)
+    
     if name_changed or url_changed or token_changed then
       target.name, target.url, target.token = name, url, token
       target.status = nil
       save_holyrics_targets()
     end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "TESTAR") then
+    
+    -- Bottom row: Test & Remove & Scan
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x2563EBFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x3B82F6FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x1D4ED8FF)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
+    if reaper.ImGui_Button(ctx, "TESTAR CONEXÃO", 130, 26) then
       local ok, message = test_route_api(target.url, target.token)
       target.status = { ok = ok, message = message }
     end
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleColor(ctx, 3)
+    
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x10B981FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x34D399FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x059669FF)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
+    
+    if reaper.ImGui_Button(ctx, "BUSCAR IP NA REDE", 140, 26) then
+      if not state.scanner.active then
+        start_network_scan(index)
+        target.status = nil -- Limpa o status feio
+      end
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then reaper.ImGui_SetTooltip(ctx, "Faz uma varredura para achar o IP do Holyrics") end
+    
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleColor(ctx, 3)
+    
     if #state.code_api_targets > 1 then
       reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_Button(ctx, "REMOVER") then remove_index = index end
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x442222FF)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x663333FF)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x884444FF)
+      reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
+      if reaper.ImGui_Button(ctx, "REMOVER", 90, 26) then remove_index = index end
+      reaper.ImGui_PopStyleVar(ctx)
+      reaper.ImGui_PopStyleColor(ctx, 3)
     end
-    if target.status then
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_TextColored(ctx, target.status.ok and HOLYRICS_MAPPED_GREEN or C.red, target.status.message)
-    end
+    
+    -- removido a pedido do usuario
+    
+    reaper.ImGui_EndChild(ctx)
+    reaper.ImGui_PopStyleVar(ctx, 2)
+    reaper.ImGui_PopStyleColor(ctx, 2)
+    
     reaper.ImGui_PopID(ctx)
+    reaper.ImGui_Dummy(ctx, 0, 4)
   end
   if remove_index then
     table.remove(state.code_api_targets, remove_index)
     save_holyrics_targets()
   end
-  if reaper.ImGui_Button(ctx, "+ ADICIONAR HOLYRICS", 180, 0) then
+  
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x10B981FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x34D399FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x059669FF)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
+  if reaper.ImGui_Button(ctx, "+ ADICIONAR HOLYRICS", 180, 32) then
     state.code_api_targets[#state.code_api_targets + 1] = { name = "Holyrics " .. (#state.code_api_targets + 1), url = "", token = "" }
     save_holyrics_targets()
   end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "ABRIR APRESENTAÇÃO", 160, 0) then
+  reaper.ImGui_PopStyleVar(ctx)
+  reaper.ImGui_PopStyleColor(ctx, 3)
+  
+  reaper.ImGui_SameLine(ctx, 0, 16)
+  
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x4F46E5FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x6366F1FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x4338CAFF)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
+  if reaper.ImGui_Button(ctx, "ABRIR APRESENTAÇÃO", 180, 32) then
     local ok, message = open_holyrics_presentation(state.automation_model)
     state.holyrics_remote_status = { ok = ok, message = message }
   end
-  if state.holyrics_remote_status then
-    reaper.ImGui_TextColored(ctx, state.holyrics_remote_status.ok and HOLYRICS_MAPPED_GREEN or C.red, state.holyrics_remote_status.message)
-  end
+  reaper.ImGui_PopStyleVar(ctx)
+  reaper.ImGui_PopStyleColor(ctx, 3)
+  
+  -- removido a pedido do usuario
+  
+  reaper.ImGui_Dummy(ctx, 0, 16)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Para o envio ao vivo, libere no token: ShowQuickPresentation e ActionGoToIndex (Local).")
-
-  reaper.ImGui_Dummy(ctx, 0, 16)
-  reaper.ImGui_Text(ctx, "TCP MIDI")
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Destino MIDI em rede")
-  reaper.ImGui_SetNextItemWidth(ctx, 260)
-  local host_changed, host = reaper.ImGui_InputText(ctx, "IP ou nome do computador##code_tcp_host", state.code_tcp_host)
-  if host_changed then
-    state.code_tcp_host = host
-    reaper.SetExtState("MultitrackController", "code_tcp_host", host, true)
-  end
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 120)
-  local port_changed, port = reaper.ImGui_InputText(ctx, "Porta##code_tcp_port", state.code_tcp_port)
-  if port_changed then
-    state.code_tcp_port = port
-    reaper.SetExtState("MultitrackController", "code_tcp_port", port, true)
-  end
-
-  reaper.ImGui_Dummy(ctx, 0, 16)
-  reaper.ImGui_Text(ctx, "MODO")
-  reaper.ImGui_SetNextItemWidth(ctx, 220)
-  if reaper.ImGui_BeginCombo(ctx, "##code_send_mode", state.code_send_mode) then
-    for _, mode in ipairs({"API + TCP MIDI", "API Server", "TCP MIDI"}) do
-      if reaper.ImGui_Selectable(ctx, mode, state.code_send_mode == mode) then
-        state.code_send_mode = mode
-        reaper.SetExtState("MultitrackController", "code_send_mode", mode, true)
-      end
-    end
-    reaper.ImGui_EndCombo(ctx)
-  end
-  reaper.ImGui_Dummy(ctx, 0, 22)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Durante o playback, cada L mapeada mostra no Holyrics o slide que contém essa linha.")
 end
 
@@ -2874,7 +2672,7 @@ local function render_automation_sync_editor(ctx)
   local is_playing = (reaper.GetPlayState() & 1) == 1
   local timeline_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
   local current_region = region_at_position(regions, timeline_position)
-  local current_line_cue = active_line_cue(model, timeline_position)
+  local current_line_cue = active_line_cue(model, timeline_position + (state.lyrics_preview_lead or 0))
   if not region_has_line_cue(model, current_region) then current_line_cue = nil end
 
   local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
@@ -3186,7 +2984,7 @@ local function render_automation_preview(ctx, show_settings)
     end
     if reaper.ImGui_BeginPopup(ctx, "LyricsPreviewSettings") then
       reaper.ImGui_Text(ctx, "ANTECIPAÇÃO DA LETRA")
-      reaper.ImGui_TextColored(ctx, preview_dim, "Mostra a próxima linha antes do cue.")
+      reaper.ImGui_TextColored(ctx, preview_dim, "Dispara o Holyrics e a prévia antes da região.")
       if reaper.ImGui_BeginCombo(ctx, "##preview_lead", string.format("%.1f s", state.lyrics_preview_lead)) then
         for _, seconds in ipairs({0, 0.5, 1.0, 1.5, 2.0, 3.0}) do
           local selected = state.lyrics_preview_lead == seconds
@@ -3359,325 +3157,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       -- abre diretamente no fluxo compacto do dia a dia.
       state.holyrics_editor_view = "SYNC"
       render_automation_sync_editor(ctx)
-      --[[
-    local proj_regions = {}
-    local idx = 0
-    while true do
-      local retval, isrgn, pos, rgnend, name, markrgnindexnumber, color = reaper.EnumProjectMarkers3(0, idx)
-      if retval == 0 then break end
-      if isrgn then
-        table.insert(proj_regions, {name = name, pos = pos, rgnend = rgnend, color = color})
-      end
-      idx = idx + 1
-    end
-    
-    local avail_w, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
-    local top_panel_h = avail_h * 0.25
-    local bottom_panel_h = avail_h - top_panel_h - 16
-    
-    -- TOP PANEL
-    reaper.ImGui_BeginChild(ctx, "##holyrics_top", avail_w, top_panel_h, true)
-    
-    reaper.ImGui_Text(ctx, "LETRA ORIGINAL")
-    
-    reaper.ImGui_SameLine(ctx, avail_w - 300)
-    reaper.ImGui_Text(ctx, "LINHAS POR SLIDE")
-    reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, 50)
-    if reaper.ImGui_BeginCombo(ctx, "##linhas_slide", tostring(state.holyrics_lines_per_slide)) then
-       for _, opt in ipairs({"1", "2", "3", "4"}) do
-          if reaper.ImGui_Selectable(ctx, opt, tonumber(opt) == state.holyrics_lines_per_slide) then
-             state.holyrics_lines_per_slide = tonumber(opt)
-             reaper.SetExtState("MultitrackController", "holyrics_lines", opt, true)
-          end
-       end
-       reaper.ImGui_EndCombo(ctx)
-    end
-    
-    reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x22C55EFF)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x33D66FFF)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x11B44DFF)
-    if reaper.ImGui_Button(ctx, "PROCESSAR LETRA", 120, 24) then
-       if state.holyrics_has_manual_edits then
-          reaper.ImGui_OpenPopup(ctx, "Confirmar Reprocessamento")
-       else
-          state.holyrics_parsed = process_holyrics(state.holyrics_text, proj_regions)
-          state.holyrics_has_manual_edits = false
-       end
-    end
-    reaper.ImGui_PopStyleColor(ctx, 3)
-    
-    -- Reprocess Popup
-    reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w / 2), win_y + (win_h / 2), reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
-    if reaper.ImGui_BeginPopupModal(ctx, "Confirmar Reprocessamento", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
-       reaper.ImGui_Text(ctx, "Reprocessar a letra substituirá as edições manuais dos slides.\nContinuar?")
-       reaper.ImGui_Dummy(ctx, 0, 8)
-       if reaper.ImGui_Button(ctx, "Reprocessar", 120, 0) then
-          state.holyrics_parsed = process_holyrics(state.holyrics_text, proj_regions)
-          state.holyrics_has_manual_edits = false
-          reaper.ImGui_CloseCurrentPopup(ctx)
-       end
-       reaper.ImGui_SameLine(ctx)
-       if reaper.ImGui_Button(ctx, "Cancelar", 120, 0) then
-          reaper.ImGui_CloseCurrentPopup(ctx)
-       end
-       reaper.ImGui_EndPopup(ctx)
-    end
-    
-    reaper.ImGui_Dummy(ctx, 0, 4)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x000000FF)
-    local rv, text = reaper.ImGui_InputTextMultiline(ctx, "##holyrics_input", state.holyrics_text, -1, -1)
-    reaper.ImGui_PopStyleColor(ctx)
-    if rv then state.holyrics_text = text end
-    
-    reaper.ImGui_EndChild(ctx) -- end top panel
-    
-    reaper.ImGui_Dummy(ctx, 0, 8)
-    
-    -- BOTTOM AREA
-    local col1_w = avail_w * 0.55
-    local col2_w = avail_w - col1_w - 8
-    
-    -- SLIDES
-    reaper.ImGui_BeginGroup(ctx)
-    reaper.ImGui_Text(ctx, "SLIDES")
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), 0x000000FF)
-    reaper.ImGui_BeginChild(ctx, "##holyrics_preview", col1_w, bottom_panel_h, true)
-    
-    for i, slide in ipairs(state.holyrics_slides) do
-      local is_highlighted = false
-      if state.holyrics_selected_region then
-         local m = state.holyrics_mapping[state.holyrics_selected_region]
-         if m then
-            for _, id in ipairs(m.slide_ids) do
-               if id == i then is_highlighted = true; break end
-            end
-         end
-      end
-      
-      local frame_h = reaper.ImGui_GetFrameHeightWithSpacing(ctx)
-      local lines_count = math.max(1, #slide)
-      local card_h = 45 + (lines_count * frame_h)
-      
-      local p_min_x, p_min_y = reaper.ImGui_GetCursorScreenPos(ctx)
-      local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
-      local p_max_x = p_min_x + avail_w
-      local p_max_y = p_min_y + card_h
-      
-      local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
-      local bg_color = is_highlighted and 0x1A3A1AFF or 0x151515FF
-      reaper.ImGui_DrawList_AddRectFilled(draw_list, p_min_x, p_min_y, p_max_x, p_max_y, bg_color, 6.0)
-      reaper.ImGui_DrawList_AddRect(draw_list, p_min_x, p_min_y, p_max_x, p_max_y, 0x333333FF, 6.0)
-      
-      reaper.ImGui_SetCursorScreenPos(ctx, p_min_x + 8, p_min_y + 8)
-      reaper.ImGui_BeginGroup(ctx)
-      
-      -- Header
-      reaper.ImGui_TextColored(ctx, 0xAAAAAAFF, "SLIDE " .. i)
-      reaper.ImGui_SameLine(ctx, avail_w - 30)
-      if reaper.ImGui_Button(ctx, "...##menu_" .. i) then
-         reaper.ImGui_OpenPopup(ctx, "SlideMenu##" .. i)
-      end
-      
-      if reaper.ImGui_BeginPopup(ctx, "SlideMenu##" .. i) then
-         if reaper.ImGui_Selectable(ctx, "+ Adicionar linha") then
-            table.insert(slide, "Nova linha")
-            state.holyrics_has_manual_edits = true
-            state.holyrics_editing_slide = i
-            state.holyrics_editing_line = #slide
-            state.holyrics_editing_text = "Nova linha"
-            state.holyrics_editing_focused = false
-         end
-         if #slide == 0 then
-            if reaper.ImGui_Selectable(ctx, "Excluir slide") then
-               slide.keep_empty = false
-               cleanup_empty_slides()
-            end
-         end
-         reaper.ImGui_EndPopup(ctx)
-      end
-      
-      reaper.ImGui_Separator(ctx)
-      reaper.ImGui_Dummy(ctx, 0, 4)
-      
-      local to_remove = nil
-      for l_idx, line in ipairs(slide) do
-        reaper.ImGui_PushID(ctx, "slide_" .. i .. "_line_" .. l_idx)
-        
-        local is_editing = (state.holyrics_editing_slide == i and state.holyrics_editing_line == l_idx)
-        
-        if is_editing then
-           if not state.holyrics_editing_focused then
-              reaper.ImGui_SetKeyboardFocusHere(ctx)
-              state.holyrics_editing_focused = true
-           end
-           
-           if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
-              state.holyrics_editing_slide = nil
-           else
-              local flags = reaper.ImGui_InputTextFlags_EnterReturnsTrue()
-              reaper.ImGui_SetNextItemWidth(ctx, avail_w - 20)
-              local rv, new_text = reaper.ImGui_InputText(ctx, "##edit", state.holyrics_editing_text, flags)
-              state.holyrics_editing_text = new_text
-              
-              if rv or (reaper.ImGui_IsItemDeactivated(ctx)) then
-                 slide[l_idx] = state.holyrics_editing_text
-                 state.holyrics_has_manual_edits = true
-                 state.holyrics_editing_slide = nil
-              end
-           end
-        else
-           local cur_x, cur_y = reaper.ImGui_GetCursorScreenPos(ctx)
-           local rv = reaper.ImGui_Selectable(ctx, line, false, reaper.ImGui_SelectableFlags_AllowItemOverlap())
-           local max_x = cur_x + avail_w - 16
-           local max_y = cur_y + reaper.ImGui_GetTextLineHeight(ctx)
-           local is_hovered = reaper.ImGui_IsMouseHoveringRect(ctx, cur_x, cur_y, max_x, max_y)
-           
-           if is_hovered and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-              state.holyrics_editing_slide = i
-              state.holyrics_editing_line = l_idx
-              state.holyrics_editing_text = line
-              state.holyrics_editing_focused = false
-           end
-           
-           if is_hovered then
-              reaper.ImGui_SameLine(ctx, avail_w - 95)
-              
-              local disable_up = (i == 1)
-              if disable_up then reaper.ImGui_BeginDisabled(ctx) end
-              if reaper.ImGui_Button(ctx, "^") then move_lyric_line(i, l_idx, -1); state.holyrics_has_manual_edits = true end
-              if disable_up then reaper.ImGui_EndDisabled(ctx) end
-              
-              reaper.ImGui_SameLine(ctx)
-              if reaper.ImGui_Button(ctx, "v") then move_lyric_line(i, l_idx, 1); state.holyrics_has_manual_edits = true end
-              
-              reaper.ImGui_SameLine(ctx)
-              if reaper.ImGui_Button(ctx, "X") then to_remove = l_idx end
-           end
-        end
-        reaper.ImGui_PopID(ctx)
-      end
-      
-      if to_remove then
-         table.remove(slide, to_remove)
-         state.holyrics_has_manual_edits = true
-         cleanup_empty_slides()
-      end
-      
-      if #slide == 0 then
-         reaper.ImGui_TextColored(ctx, 0x888888FF, "[Slide vazio]")
-      end
-      
-      reaper.ImGui_EndGroup(ctx)
-      reaper.ImGui_SetCursorScreenPos(ctx, p_min_x, p_max_y + 8)
-    end
-    
-    if reaper.ImGui_Button(ctx, "+ NOVO SLIDE", -1) then
-       table.insert(state.holyrics_slides, {keep_empty = true})
-    end
-    reaper.ImGui_EndChild(ctx)
-    reaper.ImGui_PopStyleColor(ctx)
-    reaper.ImGui_EndGroup(ctx)
-    
-    reaper.ImGui_SameLine(ctx)
-    
-    -- ESTRUTURA DA MÚSICA
-    reaper.ImGui_BeginGroup(ctx)
-    reaper.ImGui_Text(ctx, "ESTRUTURA DA MÚSICA")
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), 0x000000FF)
-    reaper.ImGui_BeginChild(ctx, "##holyrics_structure", col2_w, bottom_panel_h, true)
-    
-    if state.holyrics_mapping then
-       for i, m in ipairs(state.holyrics_mapping) do
-          local is_sel = (state.holyrics_selected_region == i)
-          
-          local p_min_x, p_min_y = reaper.ImGui_GetCursorScreenPos(ctx)
-          local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
-          local row_h = reaper.ImGui_GetFrameHeight(ctx) + 4
-          
-          if is_sel then
-             local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
-             reaper.ImGui_DrawList_AddRectFilled(draw_list, p_min_x - 4, p_min_y - 2, p_min_x + avail_w + 4, p_min_y + row_h - 2, 0x1A3A1AFF, 4.0)
-          end
-          
-          reaper.ImGui_BeginGroup(ctx)
-          
-          local col_rgba = 0x888888FF
-          if m.color and m.color ~= 0 then
-             local r, g, b = reaper.ColorFromNative(m.color)
-             col_rgba = (r << 24) | (g << 16) | (b << 8) | 0xFF
-          end
-          
-          local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
-          local cx, cy = reaper.ImGui_GetCursorScreenPos(ctx)
-          local lh = reaper.ImGui_GetTextLineHeight(ctx)
-          reaper.ImGui_DrawList_AddCircleFilled(draw_list, cx + 6, cy + lh/2, 4, col_rgba)
-          
-          reaper.ImGui_SetCursorScreenPos(ctx, cx + 16, cy)
-          
-          local num_str = string.format("%02d", i)
-          if is_sel then
-             reaper.ImGui_TextColored(ctx, 0xFFFFFFFF, num_str)
-          else
-             reaper.ImGui_TextColored(ctx, 0x888888FF, num_str)
-          end
-          
-          reaper.ImGui_SameLine(ctx, 40)
-          if is_sel then
-             reaper.ImGui_TextColored(ctx, 0xFFFFFFFF, m.name)
-          else
-             reaper.ImGui_Text(ctx, m.name)
-          end
-          
-          reaper.ImGui_SameLine(ctx, col2_w - 130)
-          
-          local btn_label = "Sem letra"
-          if #m.slide_ids > 0 then
-             local ids = {}
-             for _, id in ipairs(m.slide_ids) do table.insert(ids, tostring(id)) end
-             btn_label = "Slide " .. table.concat(ids, ", ")
-          end
-          
-          reaper.ImGui_SetNextItemWidth(ctx, 110)
-          if reaper.ImGui_BeginCombo(ctx, "##btn" .. i, btn_label) then
-             state.holyrics_selected_region = i
-             if reaper.ImGui_Selectable(ctx, "Sem letra", #m.slide_ids == 0) then
-                m.slide_ids = {}
-                m.manual = true
-             end
-             for s_idx, _ in ipairs(state.holyrics_slides) do
-                local is_assigned = false
-                for _, id in ipairs(m.slide_ids) do if id == s_idx then is_assigned = true; break end end
-                local changed, new_v = reaper.ImGui_Checkbox(ctx, "Slide " .. s_idx, is_assigned)
-                if changed then
-                   if new_v then
-                      table.insert(m.slide_ids, s_idx)
-                      table.sort(m.slide_ids)
-                   else
-                      for k, id in ipairs(m.slide_ids) do if id == s_idx then table.remove(m.slide_ids, k); break end end
-                   end
-                   m.manual = true
-                end
-             end
-             reaper.ImGui_EndCombo(ctx)
-          end
-          
-          reaper.ImGui_EndGroup(ctx)
-          
-          local row_min_x, row_min_y = reaper.ImGui_GetItemRectMin(ctx)
-          local row_max_x, row_max_y = reaper.ImGui_GetItemRectMax(ctx)
-          if reaper.ImGui_IsMouseHoveringRect(ctx, row_min_x, row_min_y, row_max_x, row_max_y) and reaper.ImGui_IsMouseClicked(ctx, 0) then
-             state.holyrics_selected_region = i
-          end
-          
-          reaper.ImGui_Dummy(ctx, 0, 4)
-       end
-    end
-    reaper.ImGui_EndChild(ctx)
-    reaper.ImGui_PopStyleColor(ctx)
-    reaper.ImGui_EndGroup(ctx)
-    ]] -- retired legacy editor
+
     end -- selected editor view
     reaper.ImGui_End(ctx)
   end
@@ -3688,7 +3168,14 @@ end
 
 local function loop()
   local frame_started = reaper.time_precise()
-  -- ─── Lógica do HOLD (Auto-Avanço de Aba) ───
+  
+  -- Processa crossfades do PAD
+  Pads.process_fades()
+  
+  -- Roda a máquina de estado do scanner de rede (1 IP por frame se ativo)
+  process_network_scan()
+  
+  -- Lógica do HOLD (Auto-Avanço de Aba)
   local current_play_state = reaper.GetPlayState() & 1
   local playback_started = current_play_state == 1 and state._last_play_state ~= 1
   if current_play_state == 1 then
@@ -3719,20 +3206,24 @@ local function loop()
 
   if state.automation_model then
     local automation_position = current_play_state == 1 and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+    
+    -- Aplica a antecipação global (configurada na engrenagem do preview) para o disparo real dos comandos
+    local engine_position = automation_position + (state.lyrics_preview_lead or 0)
+    
     local cue_state = CueEngine.update(
       state.cue_engine,
-      automation_position,
+      engine_position,
       current_play_state == 1,
       state.automation_model.cues or {},
       function(cue)
         log_simulated_cue(cue)
-        if state.code_send_mode ~= "TCP MIDI" then send_holyrics_line(cue) end
+        send_holyrics_line(cue)
       end
     )
     -- Ao apertar Play no meio da música, abre a apresentação já na L correta.
     -- Os próximos cues apenas avançam para a próxima linha, sem reabrir a tela.
-    if (playback_started or cue_state == "started") and state.code_send_mode ~= "TCP MIDI" then
-      local current_cue = active_line_cue(state.automation_model, automation_position)
+    if playback_started or cue_state == "started" then
+      local current_cue = active_line_cue(state.automation_model, engine_position)
       local ok, message = open_holyrics_presentation(state.automation_model, current_cue and current_cue.target or nil)
       state.holyrics_remote_status = { ok = ok, message = message }
     end
@@ -3878,6 +3369,7 @@ end
 
 -- Kick off
 reaper.defer(loop)
+
 
 
 

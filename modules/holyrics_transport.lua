@@ -44,7 +44,8 @@ function Transport:update()
       local file = io.open(job.response, 'rb')
       local body = file and file:read('*a') or ''
       if file then file:close() end
-      local result = json.decode(body)
+      local ok_dec, result = pcall(json.decode, body)
+      if not ok_dec then result = nil end
       if result or now >= job.deadline then
         local accepted = type(result) == 'table' and result.status == 'ok'
         job.target.status = { ok = accepted, message = accepted and 'Recebido pelo Holyrics.'

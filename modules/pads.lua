@@ -102,26 +102,45 @@ function Pads.resolve_file(pad, current_key)
 end
 
 -- Playback uses the SWS CF preview API. Each pad owns its preview handle.
+local fading_out_previews = {}
+local fading_in_previews = {}
+
 local function pad_error(message)
   reaper.ShowMessageBox(message, "Multitrack Controller - PAD", 0)
 end
 
-function Pads.stop(pad)
+function Pads.process_fades()
+  local now = reaper.time_precise()
+  for handle, fade in pairs(fading_out_previews) do
+    local elapsed = now - fade.start_time
+    local progress = elapsed / fade.duration
+    if progress >= 1.0 then
+      pcall(reaper.CF_Preview_Stop, handle)
+      fading_out_previews[handle] = nil
+    else
+      local current_vol = fade.start_vol * (1.0 - progress)
+      pcall(reaper.CF_Preview_SetValue, handle, "D_VOLUME", current_vol)
+    end
+  end
+  for handle, fade in pairs(fading_in_previews) do
+    local elapsed = now - fade.start_time
+    local progress = elapsed / fade.duration
+    if progress >= 1.0 then
+      pcall(reaper.CF_Preview_SetValue, handle, "D_VOLUME", fade.target_vol)
+      fading_in_previews[handle] = nil
+    else
+      local current_vol = fade.target_vol * progress
+      pcall(reaper.CF_Preview_SetValue, handle, "D_VOLUME", current_vol)
+    end
+  end
+end
+
+function Pads.stop(pad, fast)
   local handle = _preview_handles[pad]
   if handle then
-    local ok, stopped = pcall(reaper.CF_Preview_Stop, handle)
-    if not ok then
-      pad_error("Erro ao parar o pad: " .. tostring(stopped))
-      return false
-    end
-    if not stopped then
-      -- A completed preview is automatically destroyed by SWS.
-      local checked, valid = pcall(reaper.CF_Preview_GetValue, handle, "D_POSITION")
-      if not checked or valid then
-        pad_error("A parada do pad nao foi confirmada. Tente novamente.")
-        return false
-      end
-    end
+    local duration = fast and 0.5 or 2.0
+    fading_out_previews[handle] = { start_time = reaper.time_precise(), duration = duration, start_vol = pad.volume or 1.0 }
+    fading_in_previews[handle] = nil
     _preview_handles[pad] = nil
   end
   pad.playing = false
@@ -131,11 +150,9 @@ end
 function Pads.stop_all()
   local pending = {}
   for pad in pairs(_preview_handles) do pending[#pending + 1] = pad end
-  for _, pad in ipairs(pending) do Pads.stop(pad) end
+  for _, pad in ipairs(pending) do Pads.stop(pad, true) end
 end
 
--- Persistent ownership is stored on the track, not inferred from its name.
--- The panel currently has one PAD button, with stable identity "main".
 local function ensure_pad_track(pad)
   local project = reaper.EnumProjects(-1)
   local owner = pad.id or "main"
@@ -151,6 +168,8 @@ local function ensure_pad_track(pad)
         reaper.UpdateArrange()
       end
       reaper.SetMediaTrackInfo_Value(track, "B_MUTE", 0)
+      reaper.SetMediaTrackInfo_Value(track, "B_SHOWINTCP", 0)
+      reaper.SetMediaTrackInfo_Value(track, "B_SHOWINMIXER", 0)
       return project, track
     end
   end
@@ -162,15 +181,17 @@ local function ensure_pad_track(pad)
     reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "PAD CONTROLLER", true)
     reaper.GetSetMediaTrackInfo_String(track, tag, owner, true)
     reaper.SetMediaTrackInfo_Value(track, "B_MUTE", 0)
+    reaper.SetMediaTrackInfo_Value(track, "B_SHOWINTCP", 0)
+    reaper.SetMediaTrackInfo_Value(track, "B_SHOWINMIXER", 0)
     reaper.TrackList_AdjustWindows(false)
     reaper.UpdateArrange()
+    reaper.Undo_EndBlock2(project, "Create PAD CONTROLLER track", -1)
   end
-  reaper.Undo_EndBlock2(project, "Multitrack Controller: criar faixa exclusiva do PAD", -1)
   return project, track
 end
 
 function Pads.play(pad, current_key)
-  if _preview_handles[pad] then return Pads.stop(pad) end
+  if _preview_handles[pad] then Pads.stop(pad) end
   for _, api in ipairs({"CF_CreatePreview", "CF_Preview_SetValue", "CF_Preview_GetValue", "CF_Preview_Play", "CF_Preview_Stop", "CF_Preview_SetOutputTrack"}) do
     if not reaper[api] then
       pad_error("O PAD requer a extensao SWS com a API CF_Preview. Atualize a SWS e reinicie o REAPER.")
@@ -187,12 +208,20 @@ function Pads.play(pad, current_key)
     pad_error("Erro ao carregar: " .. file)
     return false
   end
+  
   local project, track = ensure_pad_track(pad)
   if not track then
     reaper.PCM_Source_Destroy(src)
     pad_error("Nao foi possivel criar a faixa do PAD.")
     return false
   end
+
+  -- Re-route any fading out previews to the newly active track. 
+  -- This prevents REAPER from muting them when switching tabs (projects).
+  for old_handle, _ in pairs(fading_out_previews) do
+    pcall(reaper.CF_Preview_SetOutputTrack, old_handle, project, track)
+  end
+
   -- CF_CreatePreview duplicates the source; release our original source.
   local created, handle = pcall(reaper.CF_CreatePreview, src)
   reaper.PCM_Source_Destroy(src)
@@ -202,10 +231,8 @@ function Pads.play(pad, current_key)
   end
   local ok, started = pcall(function()
     if not reaper.CF_Preview_SetValue(handle, "B_LOOP", pad.loop and 1 or 0) then return false end
-    if not reaper.CF_Preview_SetValue(handle, "D_VOLUME", 1.0) then return false end
-    -- Fade the source, leaving the track fader, FX and routing untouched.
-    if not reaper.CF_Preview_SetValue(handle, "D_FADEINLEN", 1.0) then return false end
-    if not reaper.CF_Preview_SetValue(handle, "D_FADEOUTLEN", 1.0) then return false end
+    -- Começa com volume 0 para o fade-in suave manual
+    if not reaper.CF_Preview_SetValue(handle, "D_VOLUME", 0.0) then return false end
     if not reaper.CF_Preview_SetOutputTrack(handle, project, track) then return false end
     return reaper.CF_Preview_Play(handle)
   end)
@@ -214,14 +241,34 @@ function Pads.play(pad, current_key)
     pad_error("Nao foi possivel iniciar o pad: " .. tostring(started))
     return false
   end
+  
+  local target_v = pad.volume or 1.0
+  fading_in_previews[handle] = { start_time = reaper.time_precise(), duration = 2.0, target_vol = target_v }
+  
   _preview_handles[pad] = handle
   pad.playing = true
   return true
 end
 
+function Pads.show_routing(pad)
+  local project, track = ensure_pad_track(pad)
+  if track then
+    reaper.SetOnlyTrackSelected(track)
+    reaper.Main_OnCommand(40293, 0) -- Track: View routing and I/O for current/last touched track
+  end
+end
+
+function Pads.set_volume(pad, volume)
+  pad.volume = volume
+  local handle = _preview_handles[pad]
+  if handle then
+    pcall(reaper.CF_Preview_SetValue, handle, "D_VOLUME", volume)
+  end
+end
+
 function Pads.toggle(pad, current_key)
   if _preview_handles[pad] or pad.playing then
-    return Pads.stop(pad)
+    return Pads.stop(pad, true)
   end
   return Pads.play(pad, current_key)
 end
