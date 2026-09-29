@@ -2678,9 +2678,9 @@ local function test_route_api(url, token)
   return nil, "Não foi possível ler os temas. Verifique token e permissões no Holyrics."
 end
 
--- Executa uma ação real no API Server do Holyrics. O JSON é gravado num
--- arquivo temporário para que letras com acentos, aspas e quebras de linha não
--- sejam alteradas pelo prompt de comando do Windows.
+-- Envia uma ação para o API Server sem bloquear o ciclo de áudio do REAPER.
+-- O JSON vai para um arquivo temporário único, preservando acentos, aspas e
+-- quebras de linha sem deixar o curl disputar tempo com o playback.
 local function holyrics_post(action, payload, timeout, target)
   target = target or state.code_api_targets[1] or {}
   local url = (target.url or ""):match("^%s*(.-)%s*$")
@@ -2694,7 +2694,9 @@ local function holyrics_post(action, payload, timeout, target)
   if not reaper.ExecProcess then return nil, "Esta versão do REAPER não possui o envio pela API." end
 
   local encoded = json.encode(payload or {})
-  local request_file = reaper.GetResourcePath() .. "/holyrics-code-request.json"
+  state.holyrics_request_sequence = (state.holyrics_request_sequence or 0) + 1
+  local request_file = string.format("%s/holyrics-code-request-%d-%d.json",
+    reaper.GetResourcePath(), math.floor((reaper.time_precise() or 0) * 1000000), state.holyrics_request_sequence)
   local file, write_error = io.open(request_file, "wb")
   if not file then return nil, "Não foi possível preparar o envio: " .. tostring(write_error) end
   file:write(encoded)
@@ -2702,18 +2704,12 @@ local function holyrics_post(action, payload, timeout, target)
 
   local request_url = url:gsub("/$", "") .. "/api/" .. action .. "?token=" .. token
   local command = 'curl.exe -s -X POST -H "Content-Type: application/json" --data-binary @"' .. request_file
-    .. '" --connect-timeout 2 "' .. request_url .. '" -w "\\nHTTP:%{http_code}"'
-  local ok, output = pcall(reaper.ExecProcess, command, timeout or 2500)
-  os.remove(request_file)
-  if not ok or not output then return nil, "Não foi possível enviar ao Holyrics." end
-  output = tostring(output)
-  if output:match('"status"%s*:%s*"ok"') then return true end
-  if output:match("invalid token") then return nil, "O Holyrics recusou o token." end
-  if output:match("unauthorized") or output:match("permission") then
-    return nil, "Libere no token as permissões locais ShowQuickPresentation e ActionGoToIndex."
-  end
-  if output:match("HTTP:000") then return nil, "O Holyrics não respondeu. Confira se ele continua aberto na rede." end
-  return nil, "O Holyrics não aceitou esta ação. Confira as permissões do token."
+    .. '" --connect-timeout 2 "' .. request_url .. '" >NUL 2>&1'
+  -- `start /b` devolve o controle imediatamente. O curl continua em segundo
+  -- plano e o REAPER fica livre para processar o áudio no próximo frame.
+  local ok = pcall(reaper.ExecProcess, 'cmd.exe /d /c start "" /b ' .. command, 50)
+  if not ok then return nil, "Não foi possível iniciar o envio ao Holyrics." end
+  return true
 end
 
 local function holyrics_slide_index(model, line_id)
