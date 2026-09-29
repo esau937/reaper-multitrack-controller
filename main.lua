@@ -2667,149 +2667,12 @@ local function render_route_editor(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, "Durante o playback, cada L mapeada mostra no Holyrics o slide que contém essa linha.")
 end
 
-local function render_new_automation_setup(ctx)
-  local regions = Sections.get_from_project(0)
-  local is_playing = (reaper.GetPlayState() & 1) == 1
-  local timeline_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
-  local available_w, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
-  local timeline_h = math.max(152, math.min(188, available_h * 0.25))
-
-  -- A fresh song already has the REAPER regions. Keep that map visible from
-  -- the first step; only lyric markers are missing.
-  reaper.ImGui_BeginChild(ctx, "##new_sync_timeline", 0, timeline_h, true)
-  reaper.ImGui_Text(ctx, "TIMELINE")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, format_cue_time(timeline_position))
-  reaper.ImGui_SameLine(ctx)
-  render_visual_click(ctx, timeline_position, is_playing)
-  local bar_x, bar_y = reaper.ImGui_GetCursorScreenPos(ctx)
-  local bar_w = reaper.ImGui_GetContentRegionAvail(ctx)
-  local project_length = math.max(reaper.GetProjectLength(0), 1)
-  local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
-  reaper.ImGui_DrawList_AddRectFilled(draw_list, bar_x, bar_y + 14, bar_x + bar_w, bar_y + 90, 0x151515FF, 4)
-  for _, region in ipairs(regions) do
-    local x1 = bar_x + (region.pos / project_length) * bar_w
-    local x2 = bar_x + (region.end_pos / project_length) * bar_w
-    reaper.ImGui_DrawList_AddRectFilled(draw_list, x1, bar_y + 14, x2, bar_y + 90, region.color, 2)
-    if (x2 - x1) >= reaper.ImGui_CalcTextSize(ctx, region.name) + 8 then
-      reaper.ImGui_DrawList_AddText(draw_list, x1 + 5, bar_y + 43, C.text, region.name)
-    end
-  end
-  local playhead_x = bar_x + (timeline_position / project_length) * bar_w
-  reaper.ImGui_DrawList_AddLine(draw_list, playhead_x, bar_y, playhead_x, bar_y + 120, 0xFFFFFFFF, 2)
-  reaper.ImGui_EndChild(ctx)
-
-  local _, details_h = reaper.ImGui_GetContentRegionAvail(ctx)
-  local cue_panel_w = available_w * 0.28
-  local lyric_panel_w = available_w * 0.45
-  reaper.ImGui_BeginChild(ctx, "##new_cue_list", cue_panel_w, details_h, false)
-  reaper.ImGui_Text(ctx, "LINHAS MAPEADAS")
-  reaper.ImGui_Dummy(ctx, 0, 6)
-  reaper.ImGui_TextDisabled(ctx, "As linhas mapeadas aparecerão aqui.")
-  reaper.ImGui_EndChild(ctx)
-
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##new_lyrics", lyric_panel_w, details_h, false)
-  reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
-  reaper.ImGui_Dummy(ctx, 0, 6)
-  -- Keep entry zones visibly editable without the old bright-blue cards.
-  -- A subtle border gives the user a reliable target for click, Ctrl+V and
-  -- typing on a brand-new song.
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x141A22FF)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x1E293BFF)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x1E293BFF)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), 0x3A4A60FF)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Cantor")
-  reaper.ImGui_SetNextItemWidth(ctx, -1)
-  local artist_changed, artist = reaper.ImGui_InputText(ctx, "##new_automation_artist", state.automation_title_artist or "")
-  if artist_changed then state.automation_title_artist = artist end
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Título da música")
-  reaper.ImGui_SetNextItemWidth(ctx, -1)
-  local title_changed, title = reaper.ImGui_InputText(ctx, "##new_automation_title", state.automation_title_song or "")
-  if title_changed then state.automation_title_song = title end
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Letra — clique no quadro abaixo e cole ou escreva")
-  reaper.ImGui_SetNextItemWidth(ctx, -1)
-  local lyric_height = math.max(120, details_h - 128)
-  local lyric_changed, lyrics = reaper.ImGui_InputTextMultiline(ctx, "##new_automation_lyrics", state.automation_import_text or "", -1, lyric_height)
-  if lyric_changed then state.automation_import_text = lyrics end
-  reaper.ImGui_PopStyleVar(ctx)
-  reaper.ImGui_PopStyleColor(ctx, 4)
-  reaper.ImGui_Dummy(ctx, 0, 8)
-  if reaper.ImGui_Button(ctx, "GERAR MAPA", 120, 28) then
-    local song = (state.automation_title_song or ""):match("^%s*(.-)%s*$")
-    local singer = (state.automation_title_artist or ""):match("^%s*(.-)%s*$")
-    local source = (state.automation_import_text or ""):match("^%s*(.-)%s*$")
-    if singer == "" or song == "" then
-      state.automation_error = "Informe o cantor e o título da música."
-    elseif source == "" then
-      state.automation_error = "Cole ou escreva ao menos uma linha da letra."
-    else
-      local new_model = AutomationModel.import_text(source, state.holyrics_lines_per_slide)
-      local title_line, title_error = AutomationModel.set_title_line(new_model, singer, song)
-      if title_line then
-        state.automation_model = new_model
-        state.automation_error = nil
-        save_automation_model()
-      else
-        state.automation_error = title_error
-      end
-    end
-  end
-  reaper.ImGui_EndChild(ctx)
-
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##new_slides", 0, details_h, false)
-  local header_x, header_y = reaper.ImGui_GetCursorScreenPos(ctx)
-  local header_w = reaper.ImGui_GetContentRegionAvail(ctx)
-  reaper.ImGui_Text(ctx, "SLIDES")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, C.text_dim, "Prévia da apresentação")
-  reaper.ImGui_SetCursorScreenPos(ctx, header_x + math.max(160, header_w - 126), header_y)
-  reaper.ImGui_TextDisabled(ctx, "Linhas")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 44)
-  if reaper.ImGui_BeginCombo(ctx, "##new_lines_per_slide", tostring(state.holyrics_lines_per_slide)) then
-    for _, option in ipairs({"1", "2", "3", "4"}) do
-      if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
-        state.holyrics_lines_per_slide = tonumber(option)
-        reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
-      end
-    end
-    reaper.ImGui_EndCombo(ctx)
-  end
-  reaper.ImGui_SetCursorScreenPos(ctx, header_x, header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
-  reaper.ImGui_Dummy(ctx, 0, 6)
-  reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE DE TÍTULO")
-  local title_preview = ((state.automation_title_artist or "") .. " - " .. (state.automation_title_song or "")):gsub("^%s*%-%s*", "")
-  reaper.ImGui_TextColored(ctx, C.text_dim, "LT")
-  reaper.ImGui_SameLine(ctx, 42)
-  reaper.ImGui_TextWrapped(ctx, title_preview ~= "" and title_preview or "Cantor - título da música")
-  local preview_lines, line_number = {}, 0
-  for value in ((state.automation_import_text or "") .. "\n"):gmatch("(.-)\n") do
-    value = value:match("^%s*(.-)%s*$")
-    if value ~= "" then preview_lines[#preview_lines + 1] = value end
-  end
-  for index, value in ipairs(preview_lines) do
-    if (index - 1) % state.holyrics_lines_per_slide == 0 then
-      reaper.ImGui_Dummy(ctx, 0, 6)
-      reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE S" .. tostring(math.floor((index - 1) / state.holyrics_lines_per_slide) + 1))
-    end
-    line_number = line_number + 1
-    reaper.ImGui_TextColored(ctx, C.text_dim, "L" .. tostring(line_number))
-    reaper.ImGui_SameLine(ctx, 42)
-    reaper.ImGui_TextWrapped(ctx, value)
-  end
-  if #preview_lines == 0 then reaper.ImGui_TextDisabled(ctx, "A prévia dos slides aparecerá aqui.") end
-  reaper.ImGui_EndChild(ctx)
-end
-
 local function render_automation_sync_editor(ctx)
   local model = state.automation_model
-  if not model or #model.lyrics.lines == 0 then
-    render_new_automation_setup(ctx)
-    return
-  end
+  -- SYNC has one workspace only. A new song uses a temporary empty model in
+  -- this same renderer; it never switches to a separate setup screen.
+  local is_new_map = not model or #(model.lyrics.lines or {}) == 0
+  if not model then model = AutomationModel.new() end
   local regions = Sections.get_from_project(0)
   local is_playing = (reaper.GetPlayState() & 1) == 1
   local timeline_position = is_playing and reaper.GetPlayPosition() or reaper.GetCursorPosition()
@@ -2879,7 +2742,7 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_Text(ctx, "LINHAS MAPEADAS")
   reaper.ImGui_Dummy(ctx, 0, 6)
   if #(model.cues or {}) == 0 then
-    reaper.ImGui_TextDisabled(ctx, "Nenhuma linha mapeada ainda. Clique numa linha da letra à direita.")
+    reaper.ImGui_TextDisabled(ctx, is_new_map and "Cole a letra no painel central para criar as linhas." or "Nenhuma linha mapeada ainda.")
   end
   for _, cue in ipairs(model.cues or {}) do
     reaper.ImGui_PushID(ctx, cue.id)
@@ -2902,6 +2765,52 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, false)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
   reaper.ImGui_Dummy(ctx, 0, 6)
+  if is_new_map then
+    -- These are not another screen: they are simply the empty state of the
+    -- same lyric panel. Once created, this exact panel becomes the inline
+    -- lyric editor below.
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x141A22FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), 0x1E293BFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), 0x1E293BFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), 0x3A4A60FF)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Cantor")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local artist_changed, artist = reaper.ImGui_InputText(ctx, "##automation_artist", state.automation_title_artist or "")
+    if artist_changed then state.automation_title_artist = artist end
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Título da música")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local title_changed, title = reaper.ImGui_InputText(ctx, "##automation_title", state.automation_title_song or "")
+    if title_changed then state.automation_title_song = title end
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Letra — clique no quadro abaixo e cole ou escreva")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local lyric_height = math.max(120, details_h - 150)
+    local lyric_changed, lyrics = reaper.ImGui_InputTextMultiline(ctx, "##automation_lyrics", state.automation_import_text or "", -1, lyric_height)
+    if lyric_changed then state.automation_import_text = lyrics end
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleColor(ctx, 4)
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    if reaper.ImGui_Button(ctx, "CRIAR LINHAS", 120, 28) then
+      local song = (state.automation_title_song or ""):match("^%s*(.-)%s*$")
+      local singer = (state.automation_title_artist or ""):match("^%s*(.-)%s*$")
+      local source = (state.automation_import_text or ""):match("^%s*(.-)%s*$")
+      if singer == "" or song == "" then
+        state.automation_error = "Informe o cantor e o título da música."
+      elseif source == "" then
+        state.automation_error = "Cole ou escreva ao menos uma linha da letra."
+      else
+        local new_model = AutomationModel.import_text(source, state.holyrics_lines_per_slide)
+        local title_line, title_error = AutomationModel.set_title_line(new_model, singer, song)
+        if title_line then
+          state.automation_model = new_model
+          state.automation_error = nil
+          save_automation_model()
+        else
+          state.automation_error = title_error
+        end
+      end
+    end
+  else
   for _, line in ipairs(model.lyrics.lines) do
     reaper.ImGui_PushID(ctx, "sync_" .. line.id)
     local editing = state.inline_lyric_edit_id == line.id
@@ -2946,6 +2855,7 @@ local function render_automation_sync_editor(ctx)
     end
     reaper.ImGui_PopID(ctx)
   end
+  end
   reaper.ImGui_EndChild(ctx)
 
   reaper.ImGui_SameLine(ctx)
@@ -2964,15 +2874,40 @@ local function render_automation_sync_editor(ctx)
       if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
         state.holyrics_lines_per_slide = tonumber(option)
         reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
-        AutomationModel.reflow_slides(model, state.holyrics_lines_per_slide)
-        refresh_lyric_source(model)
-        save_automation_model()
+        if not is_new_map then
+          AutomationModel.reflow_slides(model, state.holyrics_lines_per_slide)
+          refresh_lyric_source(model)
+          save_automation_model()
+        end
       end
     end
     reaper.ImGui_EndCombo(ctx)
   end
   reaper.ImGui_SetCursorScreenPos(ctx, header_x, header_y + reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4)
   reaper.ImGui_Dummy(ctx, 0, 6)
+  if is_new_map then
+    reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE DE TÍTULO")
+    local title_preview = ((state.automation_title_artist or "") .. " - " .. (state.automation_title_song or "")):gsub("^%s*%-%s*", "")
+    reaper.ImGui_TextColored(ctx, C.text_dim, "LT")
+    reaper.ImGui_SameLine(ctx, 42)
+    reaper.ImGui_TextWrapped(ctx, title_preview ~= "" and title_preview or "Cantor - título da música")
+    local preview_lines, line_number = {}, 0
+    for value in ((state.automation_import_text or "") .. "\n"):gmatch("(.-)\n") do
+      value = value:match("^%s*(.-)%s*$")
+      if value ~= "" then preview_lines[#preview_lines + 1] = value end
+    end
+    for index, value in ipairs(preview_lines) do
+      if (index - 1) % state.holyrics_lines_per_slide == 0 then
+        reaper.ImGui_Dummy(ctx, 0, 6)
+        reaper.ImGui_TextColored(ctx, HOLYRICS_ACCENT, "SLIDE S" .. tostring(math.floor((index - 1) / state.holyrics_lines_per_slide) + 1))
+      end
+      line_number = line_number + 1
+      reaper.ImGui_TextColored(ctx, C.text_dim, "L" .. tostring(line_number))
+      reaper.ImGui_SameLine(ctx, 42)
+      reaper.ImGui_TextWrapped(ctx, value)
+    end
+    if #preview_lines == 0 then reaper.ImGui_TextDisabled(ctx, "A prévia dos slides aparecerá aqui.") end
+  else
   for _, slide in ipairs(model.slides or {}) do
     reaper.ImGui_PushID(ctx, "slide_preview_" .. slide.id)
     local is_active_slide = false
@@ -3068,6 +3003,7 @@ local function render_automation_sync_editor(ctx)
     if is_active_slide then reaper.ImGui_PopStyleColor(ctx) end
     reaper.ImGui_Dummy(ctx, 0, 5)
     reaper.ImGui_PopID(ctx)
+  end
   end
   reaper.ImGui_EndChild(ctx)
 end
