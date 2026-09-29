@@ -2670,7 +2670,53 @@ end
 local function render_automation_sync_editor(ctx)
   local model = state.automation_model
   if not model or #model.lyrics.lines == 0 then
-    reaper.ImGui_TextDisabled(ctx, "Gere as linhas antes de criar cues.")
+    -- New songs start in this same compact workspace.  There are no separate
+    -- lyric/slide tabs: title, source text and the first slide layout are all
+    -- created here before the mapping surface is shown.
+    reaper.ImGui_Text(ctx, "NOVA LETRA")
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Título da música")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local title_changed, title = reaper.ImGui_InputText(ctx, "##new_automation_title", state.automation_title_song or "")
+    if title_changed then state.automation_title_song = title end
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    reaper.ImGui_TextColored(ctx, C.text_dim, "Letra")
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local lyric_changed, lyrics = reaper.ImGui_InputTextMultiline(ctx, "##new_automation_lyrics", state.automation_import_text or "", -1, 220)
+    if lyric_changed then state.automation_import_text = lyrics end
+    reaper.ImGui_Dummy(ctx, 0, 10)
+    reaper.ImGui_TextDisabled(ctx, "Linhas por slide")
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 54)
+    if reaper.ImGui_BeginCombo(ctx, "##new_automation_lines", tostring(state.holyrics_lines_per_slide)) then
+      for _, option in ipairs({"1", "2", "3", "4"}) do
+        if reaper.ImGui_Selectable(ctx, option, option == tostring(state.holyrics_lines_per_slide)) then
+          state.holyrics_lines_per_slide = tonumber(option)
+          reaper.SetExtState("MultitrackController", "holyrics_lines", option, true)
+        end
+      end
+      reaper.ImGui_EndCombo(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "GERAR MAPA", 120, 28) then
+      local song = (state.automation_title_song or ""):match("^%s*(.-)%s*$")
+      local source = (state.automation_import_text or ""):match("^%s*(.-)%s*$")
+      if song == "" then
+        state.automation_error = "Informe o título da música."
+      elseif source == "" then
+        state.automation_error = "Cole ou escreva ao menos uma linha da letra."
+      else
+        local new_model = AutomationModel.import_text(source, state.holyrics_lines_per_slide)
+        local title_line, title_error = AutomationModel.set_title_line(new_model, "", song)
+        if title_line then
+          state.automation_model = new_model
+          state.automation_error = nil
+          save_automation_model()
+        else
+          state.automation_error = title_error
+        end
+      end
+    end
     return
   end
   local regions = Sections.get_from_project(0)
