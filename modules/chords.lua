@@ -68,7 +68,7 @@ function Chords.quantize_to_project_beats(events, project)
   local _, _, _, first_beat = reaper.TimeMap2_timeToBeats(project, 0)
   local _, _, _, last_beat = reaper.TimeMap2_timeToBeats(project, length)
   if type(first_beat) ~= "number" or type(last_beat) ~= "number" then return events end
-  local out, event_index = {}, 1
+  local beat_tokens, event_index = {}, 1
   for beat = math.floor(first_beat), math.ceil(last_beat) do
     local begin_at = reaper.TimeMap2_beatsToTime(project, beat)
     local end_at = math.min(reaper.TimeMap2_beatsToTime(project, beat + 1), length)
@@ -81,14 +81,26 @@ function Chords.quantize_to_project_beats(events, project)
         if overlap > best_overlap then best_chord, best_overlap = event.chord, overlap end
         probe = probe + 1
       end
-      if best_chord and best_chord ~= "N" then
-        local previous = out[#out]
-        if previous and previous.chord == best_chord and math.abs(previous["end"] - begin_at) < 0.0001 then
-          previous["end"] = end_at
-        else
-          out[#out + 1] = {start=begin_at, ["end"]=end_at, chord=best_chord}
-        end
-      end
+      if best_chord and best_chord ~= "N" then beat_tokens[#beat_tokens + 1] = {start=begin_at, ["end"]=end_at, chord=best_chord} end
+    end
+  end
+  -- A different chord enclosed by the same chord on both adjacent beats is
+  -- a passing phrase, not a harmony change. Its *time* remains on the exact
+  -- REAPER grid; only the false classification is corrected.
+  for index = 2, #beat_tokens - 1 do
+    local previous, current, following = beat_tokens[index - 1], beat_tokens[index], beat_tokens[index + 1]
+    if previous.chord == following.chord and current.chord ~= previous.chord and
+       math.abs(previous["end"] - current.start) < 0.0001 and math.abs(current["end"] - following.start) < 0.0001 then
+      current.chord = previous.chord
+    end
+  end
+  local out = {}
+  for _, token in ipairs(beat_tokens) do
+    local previous = out[#out]
+    if previous and previous.chord == token.chord and math.abs(previous["end"] - token.start) < 0.0001 then
+      previous["end"] = token["end"]
+    else
+      out[#out + 1] = token
     end
   end
   return #out > 0 and out or events

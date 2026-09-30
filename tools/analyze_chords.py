@@ -34,7 +34,9 @@ TEMPLATES = make_templates()
 def chroma(frame, rate, bass=False):
     spectrum = np.abs(np.fft.rfft(frame * np.hanning(len(frame))))
     frequencies = np.fft.rfftfreq(len(frame), 1.0 / rate)
-    low, high = (32.7, 261.6) if bass else (55.0, 4186.0)
+    # Quality comes from the piano's middle register. Keeping the bass out of
+    # this chroma avoids a passing bass note being mistaken for a new chord.
+    low, high = (32.7, 261.6) if bass else (130.8, 4186.0)
     valid = (frequencies >= low) & (frequencies <= high)
     frequencies, spectrum = frequencies[valid], spectrum[valid]
     midi = np.rint(69 + 12 * np.log2(frequencies / 440.0)).astype(int) % 12
@@ -43,7 +45,9 @@ def chroma(frame, rate, bass=False):
 
 def label_for(harmony, bass):
     if float(np.sum(harmony)) < 0.01: return "N"
-    score, name = max((float(np.dot(harmony, template)) + 0.16 * float(bass[root]), chord)
+    # Bass validates the root but cannot override the piano harmony: bass
+    # runs and inversions are common and should not cause false changes.
+    score, name = max((float(np.dot(harmony, template)) + 0.07 * float(bass[root]), chord)
                       for chord, root, template in TEMPLATES)
     return name if score >= 0.48 else "N"
 
@@ -77,7 +81,7 @@ def analyse(source, output, sources):
         if index == len(labels) or labels[index] != labels[first]:
             events.append({"start":round(times[first],3), "end":round(times[index],3), "chord":labels[first]})
             first = index
-    data = {"version":1, "status":"automatic", "analyzer":"piano-bass spectral", "sources":sources, "events":merge(events)}
+    data = {"version":2, "status":"automatic", "analyzer":"piano-led bass-validated spectral", "sources":sources, "events":merge(events)}
     directory = os.path.dirname(output) or "."
     fd, temporary = tempfile.mkstemp(prefix=".chords-", suffix=".json", dir=directory)
     with os.fdopen(fd, "w", encoding="utf-8") as handle: json.dump(data, handle, ensure_ascii=False, separators=(",",":"))
