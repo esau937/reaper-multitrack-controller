@@ -2511,7 +2511,7 @@ local function draw_status_badge(ctx, id, status)
   
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) - 2)
-  reaper.ImGui_BeginChild(ctx, "badge_" .. id, text_w + 24, 28, true, reaper.ImGui_WindowFlags_NoScrollbar())
+  reaper.ImGui_BeginChild(ctx, "badge_" .. id, text_w + 24, 28, reaper.ImGui_ChildFlags_Borders(), reaper.ImGui_WindowFlags_NoScrollbar())
   reaper.ImGui_TextColored(ctx, text_color, status.message)
   reaper.ImGui_EndChild(ctx)
   
@@ -2584,7 +2584,7 @@ local function render_route_editor(ctx)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 8.0)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 16.0, 16.0)
     
-    reaper.ImGui_BeginChild(ctx, "card_"..index, 0, 110, true)
+    reaper.ImGui_BeginChild(ctx, "card_"..index, 0, 110, reaper.ImGui_ChildFlags_Borders())
     
     -- Labels
     reaper.ImGui_TextColored(ctx, 0xAAAAAAFF, "NOME DA CONEXÃO")
@@ -2739,7 +2739,7 @@ local function render_automation_sync_editor(ctx)
   -- The timeline is the main working surface: give it the full width and a
   -- taller lane. Mapping details live in the compact panels underneath.
   local timeline_h = math.max(152, math.min(188, available_h * 0.25))
-  reaper.ImGui_BeginChild(ctx, "##sync_timeline", 0, timeline_h, true)
+  reaper.ImGui_BeginChild(ctx, "##sync_timeline", 0, timeline_h, reaper.ImGui_ChildFlags_Borders())
   reaper.ImGui_Text(ctx, "TIMELINE")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, C.text_dim, format_cue_time(timeline_position))
@@ -2793,7 +2793,7 @@ local function render_automation_sync_editor(ctx)
   local _, details_h = reaper.ImGui_GetContentRegionAvail(ctx)
   local cue_panel_w = available_w * 0.28
   local lyric_panel_w = available_w * 0.45
-  reaper.ImGui_BeginChild(ctx, "##cue_list", cue_panel_w, details_h, false)
+  reaper.ImGui_BeginChild(ctx, "##cue_list", cue_panel_w, details_h, 0)
   reaper.ImGui_Text(ctx, "LINHAS MAPEADAS")
   reaper.ImGui_Dummy(ctx, 0, 6)
   if #(model.cues or {}) == 0 then
@@ -2817,7 +2817,7 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_EndChild(ctx)
 
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, false)
+  reaper.ImGui_BeginChild(ctx, "##sync_lyrics_preview", lyric_panel_w, details_h, 0)
   local lyric_header_x, lyric_header_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local lyric_header_w = reaper.ImGui_GetContentRegionAvail(ctx)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
@@ -2988,7 +2988,7 @@ local function render_automation_sync_editor(ctx)
   reaper.ImGui_EndChild(ctx)
 
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_BeginChild(ctx, "##sync_slides_preview", 0, details_h, false)
+  reaper.ImGui_BeginChild(ctx, "##sync_slides_preview", 0, details_h, 0)
   local header_x, header_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local header_w = reaper.ImGui_GetContentRegionAvail(ctx)
   reaper.ImGui_Text(ctx, "SLIDES")
@@ -3168,7 +3168,7 @@ local function render_automation_preview(ctx, show_settings)
   local preview_text = light_theme and 0x181818FF or C.text
   local preview_dim = light_theme and 0x666666FF or C.text_dim
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), preview_bg)
-  reaper.ImGui_BeginChild(ctx, "##live_lyric_preview", 0, preview_h, true)
+  reaper.ImGui_BeginChild(ctx, "##live_lyric_preview", 0, preview_h, reaper.ImGui_ChildFlags_Borders())
   reaper.ImGui_TextColored(ctx, preview_text, "PRÉVIA AO VIVO")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, preview_dim, format_cue_time(transport_position))
