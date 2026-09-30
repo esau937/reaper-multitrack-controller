@@ -45,44 +45,43 @@ function Chords.simplify(events)
       basic[#basic + 1] = {start=event.start, ["end"]=event["end"], chord=chord, edited=event.edited, keep=event.keep}
     end
   end
-  events = basic
-  local out = {}
-  local function append(event)
-    local last = out[#out]
-    if last and last.chord == event.chord and math.abs(last["end"] - event.start) < 0.000001 then
-      last["end"] = event["end"]
-    else
-      out[#out + 1] = {start=event.start, ["end"]=event["end"], chord=event.chord}
-    end
+  -- The automatic detector can briefly prefer a neighbouring chord while a
+  -- note is being played. A musician cannot use 100 ms flashes of a chord on
+  -- stage, so absorb every unstable change shorter than this threshold into
+  -- its longer neighbour. The original, complete map remains available when
+  -- the simplified display option is disabled.
+  local stable = {}
+  for _, event in ipairs(basic) do
+    stable[#stable + 1] = {start=event.start, ["end"]=event["end"], chord=event.chord,
+      edited=event.edited, keep=event.keep}
   end
-  local i = 1
-  while i <= #events do
-    local event, previous = events[i], events[i - 1]
-    local finish, j = event.start, i
-    if previous and previous.chord ~= "N" and previous["end"] - previous.start >= 1.5 then
-      while j <= #events do
-        local candidate = events[j]
-        if candidate.chord == "N" or candidate.edited or candidate.keep or
-           candidate["end"] - candidate.start >= 1 or
-           math.abs(candidate.start - finish) > 0.000001 then break end
-        finish = candidate["end"]
-        j = j + 1
+  local minimum_duration = 1.15
+  local index = 1
+  while index <= #stable do
+    local event = stable[index]
+    local duration = event["end"] - event.start
+    if duration < minimum_duration and not event.edited and not event.keep and #stable > 1 then
+      local previous, following = stable[index - 1], stable[index + 1]
+      if previous and following and previous.chord == following.chord then
+        previous["end"] = following["end"]
+        table.remove(stable, index + 1)
+        table.remove(stable, index)
+        index = math.max(1, index - 1)
+      elseif previous and (not following or previous["end"] - previous.start >= following["end"] - following.start) then
+        previous["end"] = event["end"]
+        table.remove(stable, index)
+        index = math.max(1, index - 1)
+      elseif following then
+        following.start = event.start
+        table.remove(stable, index)
+      else
+        index = index + 1
       end
-    end
-    local following = events[j]
-    local can_bridge = j > i and finish - event.start <= 1 and
-      math.abs(previous["end"] - event.start) < 0.000001 and following and
-      following.chord ~= "N" and following["end"] - following.start >= 1.5 and
-      math.abs(following.start - finish) < 0.000001
-    if can_bridge then
-      append({start=event.start, ["end"]=finish, chord=previous.chord})
-      i = j
     else
-      append(event)
-      i = i + 1
+      index = index + 1
     end
   end
-  return out
+  return stable
 end
 
 function Chords.is_simplified()
