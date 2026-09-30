@@ -92,10 +92,13 @@ function Analyzer.ensure(proj, project_path, script_path)
   if not input then pending[project_path] = nil; return err end
   local python = os.getenv("LOCALAPPDATA") .. "\\Programs\\Python\\Python311\\python.exe"
   local script = script_path .. "tools\\analyze_chords.py"
+  local launcher = script_path .. "tools\\run_hidden.vbs"
   os.remove(error_file)
-  local command = quote(python) .. " " .. quote(script) .. " " .. quote(input) .. " " .. quote(output)
+  local command = quote(os.getenv("WINDIR") .. "\\System32\\wscript.exe") .. " " .. quote(launcher) .. " " ..
+    quote(python) .. " " .. quote(script) .. " " .. quote(input) .. " " .. quote(output)
   for _, name in ipairs(names) do command = command .. " " .. quote(name) end
-  reaper.ExecProcess(command, 0)
+  -- wscript returns immediately after starting Python, so REAPER never blocks.
+  reaper.ExecProcess(command, -1)
   return "Analisando"
 end
 
