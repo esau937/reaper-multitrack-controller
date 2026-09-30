@@ -3179,7 +3179,7 @@ end
 
 -- A faithful local output preview.  It intentionally uses the same cue and
 -- region rules as SYNC, making it the visual contract for Holyrics and Trackly.
-local function render_automation_preview(ctx, show_settings)
+render_automation_preview = function(ctx, show_settings)
   local model = state.automation_model
   if not model or #model.lyrics.lines == 0 then
     reaper.ImGui_TextDisabled(ctx, "Gere e mapeie a letra antes de abrir a prévia.")
