@@ -675,8 +675,8 @@ local function update_state()
       state.pitch_offset = pitch_state and pitch_state.offset or 0
       
       local pad = state.pads[1]
-      if pad and pad.playing then
-        Pads.play(pad, get_shifted_key())
+      if pad and Pads.is_active_or_transitioning(pad) then
+        Pads.transition(pad, get_shifted_key())
       end
       
       import_mapa_if_empty(proj, proj_path)

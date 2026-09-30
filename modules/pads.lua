@@ -104,6 +104,7 @@ end
 -- Playback uses the SWS CF preview API. Each pad owns its preview handle.
 local fading_out_previews = {}
 local fading_in_previews = {}
+local pending_starts = {}
 
 -- A preview em fade ainda esta tocando no REAPER, mesmo depois de o PAD deixar
 -- de apontar para ela. Sempre a encerramos antes de iniciar outra preview do
@@ -153,9 +154,21 @@ function Pads.process_fades()
       pcall(reaper.CF_Preview_SetValue, handle, "D_VOLUME", current_vol)
     end
   end
+
+  -- Em troca de musica, o proximo PAD so inicia depois que o anterior
+  -- terminou de sair. Isso evita o corte seco e tambem evita sobreposicao.
+  local ready = {}
+  for pad, start in pairs(pending_starts) do
+    if now >= start.at then ready[#ready + 1] = { pad = pad, start = start } end
+  end
+  for _, item in ipairs(ready) do
+    pending_starts[item.pad] = nil
+    Pads.play(item.pad, item.start.key, item.start.fade_in_duration)
+  end
 end
 
 function Pads.stop(pad, fast)
+  pending_starts[pad] = nil
   local handle = _preview_handles[pad]
   if handle then
     local duration = fast and 0.5 or 2.0
@@ -167,12 +180,17 @@ function Pads.stop(pad, fast)
     }
     fading_in_previews[handle] = nil
     _preview_handles[pad] = nil
+  else
+    -- O botao PAD tambem deve cancelar uma transicao que esteja apenas no
+    -- fade-out, sem deixar o audio antigo terminar escondido.
+    stop_fading_previews_for(pad)
   end
   pad.playing = false
   return true
 end
 
 function Pads.stop_all()
+  pending_starts = {}
   local pending = {}
   for pad in pairs(_preview_handles) do pending[#pending + 1] = pad end
   for _, pad in ipairs(pending) do Pads.stop(pad, true) end
@@ -221,7 +239,7 @@ local function ensure_pad_track(pad)
   return project, track
 end
 
-function Pads.play(pad, current_key)
+function Pads.play(pad, current_key, fade_in_duration)
   -- Nao deixe um fade antigo continuar audivel quando o usuario troca de tom
   -- ou aperta PAD novamente. Ha apenas uma preview por PAD.
   if _preview_handles[pad] then Pads.stop(pad, true) end
@@ -280,13 +298,65 @@ function Pads.play(pad, current_key)
   fading_in_previews[handle] = {
     pad = pad,
     start_time = reaper.time_precise(),
-    duration = 0.15,
+    duration = fade_in_duration or 0.15,
     target_vol = target_v,
   }
   
   _preview_handles[pad] = handle
   pad.playing = true
   return true
+end
+
+--- Troca de pad entre musicas: sai por completo antes de iniciar o novo.
+-- Nao use Pads.play aqui, pois ele reinicia a preview imediatamente.
+function Pads.transition(pad, current_key)
+  local fade_out_duration = 1.0
+  local fade_in_duration = 1.0
+  pending_starts[pad] = nil
+
+  if _preview_handles[pad] then
+    -- stop() usa 2 segundos por padrao. Para a troca entre abas usamos uma
+    -- transicao audivel, mas sem alongar demais a passagem para a proxima musica.
+    local handle = _preview_handles[pad]
+    fading_out_previews[handle] = {
+      pad = pad,
+      start_time = reaper.time_precise(),
+      duration = fade_out_duration,
+      start_vol = pad.volume or 1.0,
+    }
+    fading_in_previews[handle] = nil
+    _preview_handles[pad] = nil
+    pad.playing = false
+    pending_starts[pad] = {
+      at = reaper.time_precise() + fade_out_duration,
+      key = current_key,
+      fade_in_duration = fade_in_duration,
+    }
+    return true
+  end
+
+  -- Se ja houver um fade saindo (troca de aba repetida), conserva o fade e
+  -- apenas substitui o tom que sera iniciado ao final dele.
+  for _, fade in pairs(fading_out_previews) do
+    if fade.pad == pad then
+      pending_starts[pad] = {
+        at = fade.start_time + fade.duration,
+        key = current_key,
+        fade_in_duration = fade_in_duration,
+      }
+      return true
+    end
+  end
+
+  return Pads.play(pad, current_key, fade_in_duration)
+end
+
+function Pads.is_active_or_transitioning(pad)
+  if _preview_handles[pad] or pending_starts[pad] then return true end
+  for _, fade in pairs(fading_out_previews) do
+    if fade.pad == pad then return true end
+  end
+  return false
 end
 
 function Pads.show_routing(pad)
@@ -309,7 +379,7 @@ function Pads.set_volume(pad, volume)
 end
 
 function Pads.toggle(pad, current_key)
-  if _preview_handles[pad] or pad.playing then
+  if Pads.is_active_or_transitioning(pad) then
     return Pads.stop(pad, true)
   end
   return Pads.play(pad, current_key)
