@@ -1433,7 +1433,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   -- HOLYRICS (Linha 2)
   reaper.ImGui_SetCursorScreenPos(ctx, marker_x, row2_y)
   push_btn_style()
-  if reaper.ImGui_Button(ctx, state.live_mode and "ENSAIO" or "AO VIVO", marker_w, marker_h) then
+  if reaper.ImGui_Button(ctx, state.live_mode and "ENSAIO##panel" or "AO VIVO##panel", marker_w, marker_h) then
     state.live_mode = not state.live_mode
   end
   pop_btn_style()
@@ -2285,7 +2285,7 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   else
     push_btn_style()
   end
-  if reaper.ImGui_Button(ctx, state.live_mode and "ENSAIO" or "AO VIVO", click_w, bh) then
+  if reaper.ImGui_Button(ctx, state.live_mode and "ENSAIO##transport" or "AO VIVO##transport", click_w, bh) then
     state.live_mode = not state.live_mode
   end
   if state.live_mode then
