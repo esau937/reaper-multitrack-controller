@@ -91,19 +91,11 @@ reaper.ImGui_Attach(ctx, font_large)
 reaper.ImGui_Attach(ctx, font_small)
 reaper.ImGui_Attach(ctx, font_preview)
 
--- ReaImGui v0.7 e anterior exige o tamanho em PushFont; a partir do v0.8
--- a função recebe somente contexto e fonte. Não usamos uma chamada-teste:
--- o REAPER exibe uma caixa de erro mesmo quando a chamada está em pcall.
-local _, version_value, version_fallback = reaper.ImGui_GetVersion()
-local reaimgui_version = tostring(version_fallback or version_value or "")
-local version_major, version_minor = reaimgui_version:match("(%d+)%.(%d+)")
-local push_font_needs_size = version_major == "0" and tonumber(version_minor) and tonumber(version_minor) < 8
+-- PushFont requer o tamanho como terceiro argumento nas versões atuais do
+-- ReaImGui. Mantemos o tamanho local porque o REAPER valida os argumentos
+-- antes de executar a função.
 local function push_font_compat(font_to_push, size)
-  if push_font_needs_size then
-    reaper.ImGui_PushFont(ctx, font_to_push, size)
-  else
-    reaper.ImGui_PushFont(ctx, font_to_push)
-  end
+  reaper.ImGui_PushFont(ctx, font_to_push, size)
 end
 
 -- ─── Color palette (0xRRGGBBAA) ──────────────────────────────────────────────
