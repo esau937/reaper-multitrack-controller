@@ -98,6 +98,32 @@ local function push_font_compat(font_to_push, size)
   reaper.ImGui_PushFont(ctx, font_to_push, size)
 end
 
+-- O ReaImGui 0.10 não aceita mais índices numéricos genéricos de teclado.
+-- Mantemos uma lista explícita de teclas suportadas tanto para os atalhos como
+-- para a janela de mapeamento, evitando que um atalho salvo numa versão antiga
+-- interrompa a renderização do controlador.
+local MAPPABLE_KEY_NAMES = {
+  "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+  "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+  "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+  "Space", "Enter", "Tab", "Backspace", "Delete", "Insert", "Escape",
+  "UpArrow", "DownArrow", "LeftArrow", "RightArrow", "Home", "End", "PageUp", "PageDown",
+  "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+}
+local MAPPABLE_KEYS, MAPPABLE_KEY_SET = {}, {}
+for _, name in ipairs(MAPPABLE_KEY_NAMES) do
+  local getter = reaper["ImGui_Key_" .. name]
+  if getter then
+    local key = getter()
+    MAPPABLE_KEYS[#MAPPABLE_KEYS + 1] = { code = key, name = name }
+    MAPPABLE_KEY_SET[key] = true
+  end
+end
+
+local function is_mappable_key_pressed(key, repeat_enabled)
+  return MAPPABLE_KEY_SET[key] and reaper.ImGui_IsKeyPressed(ctx, key, repeat_enabled) or false
+end
+
 -- ─── Color palette (0xRRGGBBAA) ──────────────────────────────────────────────
 
 local C = {
@@ -732,7 +758,7 @@ local function handle_mapped_button(ctx, button_id, action_func, extra_menu_func
   end
 
   local mapped_key = state.key_mappings[button_id]
-  if mapped_key and reaper.ImGui_IsKeyPressed(ctx, mapped_key, false) then
+  if mapped_key and is_mappable_key_pressed(mapped_key, false) then
     if not reaper.ImGui_IsAnyItemActive(ctx) then
       action_func()
     end
@@ -754,30 +780,24 @@ local function render_key_mapping_modal(ctx, win_x, win_y, win_w, win_h)
     reaper.ImGui_Text(ctx, "Pressione a tecla para o botao: " .. string.upper(state.mapping_target))
     reaper.ImGui_Separator(ctx)
     
-    for key = 0, 650 do
-      if reaper.ImGui_IsKeyPressed(ctx, key, false) then
-        local is_mouse = false
-        if reaper.ImGui_Key_MouseLeft and key == reaper.ImGui_Key_MouseLeft() then is_mouse = true end
-        if reaper.ImGui_Key_MouseRight and key == reaper.ImGui_Key_MouseRight() then is_mouse = true end
-        if reaper.ImGui_Key_MouseMiddle and key == reaper.ImGui_Key_MouseMiddle() then is_mouse = true end
-        
-        if not is_mouse then
-          if key == reaper.ImGui_Key_Escape() then
-            -- Cancela
-          elseif reaper.ImGui_Key_Delete and key == reaper.ImGui_Key_Delete() then
+    for _, key_data in ipairs(MAPPABLE_KEYS) do
+      local key = key_data.code
+      if is_mappable_key_pressed(key, false) then
+        if key == reaper.ImGui_Key_Escape() then
+          -- Cancela
+        elseif reaper.ImGui_Key_Delete and key == reaper.ImGui_Key_Delete() then
             state.key_mappings[state.mapping_target] = nil
             reaper.SetExtState("MultitrackController", "key_mappings", json.encode(state.key_mappings), true)
-          elseif reaper.ImGui_Key_Backspace and key == reaper.ImGui_Key_Backspace() then
+        elseif reaper.ImGui_Key_Backspace and key == reaper.ImGui_Key_Backspace() then
             state.key_mappings[state.mapping_target] = nil
             reaper.SetExtState("MultitrackController", "key_mappings", json.encode(state.key_mappings), true)
-          else
+        else
             state.key_mappings[state.mapping_target] = key
             reaper.SetExtState("MultitrackController", "key_mappings", json.encode(state.key_mappings), true)
-          end
-          state.mapping_target = nil
-          reaper.ImGui_CloseCurrentPopup(ctx)
-          break
         end
+        state.mapping_target = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+        break
       end
     end
     
