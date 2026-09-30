@@ -184,6 +184,8 @@ for k, v in pairs(DEFAULT_MIDI_MAP) do
   end
 end
 
+local render_automation_preview
+
 local state = {
   current_key      = nil,
   current_proj_name= "",
@@ -1372,37 +1374,14 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local right_y = draw_y
     local right_h = draw_h
     reaper.ImGui_SetCursorScreenPos(ctx, right_x, right_y)
-    local model = state.automation_model
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), 0x0A0A0AFF)
-    if reaper.ImGui_BeginChild(ctx, "##live_right_preview", right_w, right_h, reaper.ImGui_ChildFlags_Borders()) then
-      if not model or not model.lyrics or #(model.lyrics.lines or {}) == 0 then
-        reaper.ImGui_TextDisabled(ctx, "Nenhuma letra mapeada.")
-      else
-        local transport_position = (reaper.GetPlayState() & 1 == 1) and reaper.GetPlayPosition() or reaper.GetCursorPosition()
-        local active_line_id = nil
-        if state.cue_engine and state.cue_engine.last_fired then
-          local last = state.cue_engine.last_fired
-          if last and last.action == "SHOW_LINE" then active_line_id = last.target end
-        end
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
-        reaper.ImGui_TextWrapped(ctx, "AO VIVO")
-        reaper.ImGui_PopStyleColor(ctx)
-        reaper.ImGui_Separator(ctx)
-        -- Mostra as linhas; destaca a linha ativa
-        for _, line in ipairs(model.lyrics.lines) do
-          local is_active = (line.id == active_line_id)
-          if is_active then
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x10B981FF)
-          end
-          reaper.ImGui_TextWrapped(ctx, line.text or "")
-          if is_active then
-            reaper.ImGui_PopStyleColor(ctx)
-          end
-        end
+    
+    if reaper.ImGui_BeginChild(ctx, "##live_preview_container", right_w, right_h, reaper.ImGui_ChildFlags_None()) then
+      if render_automation_preview then
+        render_automation_preview(ctx, false)
       end
       reaper.ImGui_EndChild(ctx)
     end
-    reaper.ImGui_PopStyleColor(ctx)
+    
     return  -- nao desenha os botoes normais
   end
 
