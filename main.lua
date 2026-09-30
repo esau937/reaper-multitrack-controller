@@ -67,6 +67,7 @@ local Sections   = require("sections")
 local Pads       = require("pads")
 local Repertoire = require("repertoire")
 local Chords = require("chords")
+local ChordAnalyzer = require("chord_analyzer")
 local AutomationModel = require("automation_model")
 local AutomationStore = require("automation_store")
 local CueEngine = require("cue_engine")
@@ -169,6 +170,8 @@ local state = {
   current_key      = nil,
   current_proj_name= "",
   current_proj_path= "",
+  chord_analysis_status = nil,
+  chord_analysis_checked_at = 0,
   sections         = {},
   setlist          = nil,
   pads = {
@@ -698,6 +701,7 @@ local function update_state()
     
     state.sections = Sections.get_from_project(proj)
     refresh_project_cover(proj, proj_path)
+    state.chord_analysis_status = ChordAnalyzer.status(proj_path)
   end
 end
 
@@ -1294,6 +1298,9 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   -- Chords sit above the right-hand button grid, in the unused header space.
   local pitch_state = state.pitch_projects[tostring(proj)]
   local chord, next_chord, automatic = Chords.display(json, pitch_state and pitch_state.offset or 0)
+  if chord == "SEM MAPA" and state.chord_analysis_status then
+    chord = string.upper(state.chord_analysis_status)
+  end
   local chord_y = row1_y - 48
   reaper.ImGui_DrawList_PushClipRect(draw_list, marker_x, chord_y, marker_x + combined_w, row1_y - 2, true)
   reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y, C.text_dim, automatic and (Chords.is_simplified() and "AUTO · SIMPLES" or "ACORDE · AUTO") or "ACORDE")
@@ -1429,6 +1436,12 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   if reaper.ImGui_BeginPopup(ctx, "OpcoesPopup") then
     if reaper.ImGui_Selectable(ctx, "Acordes simplificados", Chords.is_simplified(), 0, 0, 22) then
       Chords.toggle_mode()
+    end
+
+    if reaper.ImGui_Selectable(ctx, "Reanalisar acordes automaticamente", false, 0, 0, 22) then
+      ChordAnalyzer.reset(state.current_proj_path)
+      state.chord_analysis_status = "Aguardando nova análise"
+      reaper.ImGui_CloseCurrentPopup(ctx)
     end
 
     if reaper.ImGui_Selectable(ctx, "Pasta de Pads", false, 0, 0, 22) then
@@ -3375,6 +3388,14 @@ local function loop()
   state._last_play_state = current_play_state
 
   update_state()
+
+  -- Chords are generated once, only while stopped, from tracks named PIANO
+  -- and BASS/BAIXO. Once the sidecar exists this is an inexpensive file check.
+  if frame_started - (state.chord_analysis_checked_at or 0) >= 2 then
+    state.chord_analysis_checked_at = frame_started
+    local active_project = reaper.EnumProjects(-1)
+    state.chord_analysis_status = ChordAnalyzer.ensure(active_project, state.current_proj_path, SCRIPT_PATH)
+  end
 
   if state.automation_model then
     local automation_position = current_play_state == 1 and reaper.GetPlayPosition() or reaper.GetCursorPosition()
