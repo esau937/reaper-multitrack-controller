@@ -1,6 +1,7 @@
 -- Read-only display of pre-analysed chords. No audio or track changes.
 local Chords = {}
 local cached_path, cached_data, checked_at = nil, nil, -math.huge
+local live = {chord=nil, candidate=nil, candidate_at=0, position=nil}
 
 function Chords.at(events, position)
   local lo, hi, found = 1, #events, 0
@@ -55,10 +56,9 @@ function Chords.simplify(events)
     stable[#stable + 1] = {start=event.start, ["end"]=event["end"], chord=event.chord,
       edited=event.edited, keep=event.keep}
   end
-  -- Two seconds is deliberately conservative for the on-stage display. It
-  -- keeps the player on the harmonic pulse instead of flashing incidental
-  -- notes, bends and passing tones detected in the source tracks.
-  local minimum_duration = 2.0
+  -- Remove only very brief detection noise here. The live display below then
+  -- confirms a new chord before showing it, so real harmonic changes remain.
+  local minimum_duration = 0.65
   local index = 1
   while index <= #stable do
     local event = stable[index]
@@ -144,7 +144,23 @@ function Chords.display(json, shift)
   local display_events = data.status == "automatic" and data.simplified_events or
     (Chords.is_simplified() and data.simplified_events or data.events)
   local current, next_event = Chords.at(display_events, display_position)
-  return Chords.transpose(current and current.chord, shift),
-    Chords.transpose(next_event and next_event.chord, shift), data.status ~= "reviewed"
+  local detected = Chords.transpose(current and current.chord, shift)
+  local now = reaper.time_precise()
+  -- Seeking, stopping or jumping to another song must show the chord at the
+  -- new position immediately; ordinary playback uses a short confirmation
+  -- window so passing notes cannot make the stage display flicker.
+  if not live.position or math.abs(display_position - live.position) > 1.2 then
+    live.chord, live.candidate, live.candidate_at = detected, nil, 0
+  elseif detected ~= live.chord then
+    if live.candidate ~= detected then
+      live.candidate, live.candidate_at = detected, now
+    elseif now - live.candidate_at >= 0.55 then
+      live.chord, live.candidate, live.candidate_at = detected, nil, 0
+    end
+  else
+    live.candidate, live.candidate_at = nil, 0
+  end
+  live.position = display_position
+  return live.chord or detected, Chords.transpose(next_event and next_event.chord, shift), data.status ~= "reviewed"
 end
 return Chords
