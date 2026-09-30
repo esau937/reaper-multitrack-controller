@@ -55,7 +55,10 @@ function Chords.simplify(events)
     stable[#stable + 1] = {start=event.start, ["end"]=event["end"], chord=event.chord,
       edited=event.edited, keep=event.keep}
   end
-  local minimum_duration = 1.15
+  -- Two seconds is deliberately conservative for the on-stage display. It
+  -- keeps the player on the harmonic pulse instead of flashing incidental
+  -- notes, bends and passing tones detected in the source tracks.
+  local minimum_duration = 2.0
   local index = 1
   while index <= #stable do
     local event = stable[index]
@@ -135,7 +138,12 @@ function Chords.display(json, shift)
   -- Paused/stopped inspection remains aligned with the exact cursor position.
   local display_position = position
   if (reaper.GetPlayState() & 1) ~= 0 then display_position = position + 0.002 end
-  local current, next_event = Chords.at(Chords.is_simplified() and data.simplified_events or data.events, display_position)
+  -- Automatic maps are always shown in their stable form. The raw result is
+  -- useful only for diagnostics; showing it live makes the chord display
+  -- unusable due to incidental-note changes.
+  local display_events = data.status == "automatic" and data.simplified_events or
+    (Chords.is_simplified() and data.simplified_events or data.events)
+  local current, next_event = Chords.at(display_events, display_position)
   return Chords.transpose(current and current.chord, shift),
     Chords.transpose(next_event and next_event.chord, shift), data.status ~= "reviewed"
 end
