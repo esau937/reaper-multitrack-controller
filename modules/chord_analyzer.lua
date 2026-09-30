@@ -94,11 +94,17 @@ function Analyzer.ensure(proj, project_path, script_path)
   local script = script_path .. "tools\\analyze_chords.py"
   local launcher = script_path .. "tools\\run_hidden.vbs"
   os.remove(error_file)
-  local command = quote(os.getenv("WINDIR") .. "\\System32\\wscript.exe") .. " " .. quote(launcher) .. " " ..
+  -- `wscript.exe` is on Windows' executable path. Do not depend on WINDIR:
+  -- REAPER can run scripts with a reduced environment where that variable is absent.
+  local command = quote("wscript.exe") .. " " .. quote(launcher) .. " " ..
     quote(python) .. " " .. quote(script) .. " " .. quote(input) .. " " .. quote(output)
   for _, name in ipairs(names) do command = command .. " " .. quote(name) end
   -- wscript returns immediately after starting Python, so REAPER never blocks.
-  reaper.ExecProcess(command, -1)
+  local started, start_error = pcall(reaper.ExecProcess, command, -1)
+  if not started then
+    pending[project_path] = nil
+    return "Falha ao iniciar análise: " .. tostring(start_error)
+  end
   return "Analisando"
 end
 
