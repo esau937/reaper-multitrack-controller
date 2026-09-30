@@ -1387,7 +1387,6 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
       reaper.ImGui_EndChild(ctx)
     end
     reaper.ImGui_PopStyleColor(ctx)
-    reaper.ImGui_PopStyleVar(ctx)
     return  -- nao desenha os botoes normais
   end
 
