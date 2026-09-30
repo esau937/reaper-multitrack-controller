@@ -1,7 +1,6 @@
 -- Read-only display of pre-analysed chords. No audio or track changes.
 local Chords = {}
 local cached_path, cached_data, checked_at = nil, nil, -math.huge
-local live = {chord=nil, candidate=nil, candidate_at=0, position=nil}
 
 function Chords.at(events, position)
   local lo, hi, found = 1, #events, 0
@@ -56,35 +55,43 @@ function Chords.simplify(events)
     stable[#stable + 1] = {start=event.start, ["end"]=event["end"], chord=event.chord,
       edited=event.edited, keep=event.keep}
   end
-  -- Remove only very brief detection noise here. The live display below then
-  -- confirms a new chord before showing it, so real harmonic changes remain.
-  local minimum_duration = 0.65
-  local index = 1
-  while index <= #stable do
-    local event = stable[index]
-    local duration = event["end"] - event.start
-    if duration < minimum_duration and not event.edited and not event.keep and #stable > 1 then
-      local previous, following = stable[index - 1], stable[index + 1]
-      if previous and following and previous.chord == following.chord then
-        previous["end"] = following["end"]
-        table.remove(stable, index + 1)
-        table.remove(stable, index)
-        index = math.max(1, index - 1)
-      elseif previous and (not following or previous["end"] - previous.start >= following["end"] - following.start) then
-        previous["end"] = event["end"]
-        table.remove(stable, index)
-        index = math.max(1, index - 1)
-      elseif following then
-        following.start = event.start
-        table.remove(stable, index)
-      else
-        index = index + 1
+  return basic
+end
+
+-- Audio analysis works in short FFT windows, whereas musicians change
+-- harmony on the project's beat grid. Re-bin the detected harmony by the
+-- actual REAPER tempo map: no arbitrary delay or duration threshold is used.
+function Chords.quantize_to_project_beats(events, project)
+  if not reaper.TimeMap2_timeToBeats or not reaper.TimeMap2_beatsToTime then return events end
+  local length = reaper.GetProjectLength(project)
+  if length <= 0 or #events == 0 then return events end
+  local _, _, _, first_beat = reaper.TimeMap2_timeToBeats(project, 0)
+  local _, _, _, last_beat = reaper.TimeMap2_timeToBeats(project, length)
+  if type(first_beat) ~= "number" or type(last_beat) ~= "number" then return events end
+  local out, event_index = {}, 1
+  for beat = math.floor(first_beat), math.ceil(last_beat) do
+    local begin_at = reaper.TimeMap2_beatsToTime(project, beat)
+    local end_at = math.min(reaper.TimeMap2_beatsToTime(project, beat + 1), length)
+    if end_at > begin_at then
+      while event_index <= #events and events[event_index]["end"] <= begin_at do event_index = event_index + 1 end
+      local probe, best_chord, best_overlap = event_index, nil, 0
+      while probe <= #events and events[probe].start < end_at do
+        local event = events[probe]
+        local overlap = math.max(0, math.min(event["end"], end_at) - math.max(event.start, begin_at))
+        if overlap > best_overlap then best_chord, best_overlap = event.chord, overlap end
+        probe = probe + 1
       end
-    else
-      index = index + 1
+      if best_chord and best_chord ~= "N" then
+        local previous = out[#out]
+        if previous and previous.chord == best_chord and math.abs(previous["end"] - begin_at) < 0.0001 then
+          previous["end"] = end_at
+        else
+          out[#out + 1] = {start=begin_at, ["end"]=end_at, chord=best_chord}
+        end
+      end
     end
   end
-  return stable
+  return #out > 0 and out or events
 end
 
 function Chords.is_simplified()
@@ -112,6 +119,7 @@ function Chords.read(project_path, json)
     previous_end = event["end"]
   end
   data.simplified_events = Chords.simplify(data.events)
+  data.beat_events = data.status == "automatic" and Chords.quantize_to_project_beats(data.events, 0) or data.events
   cached_data = data
   return data
 end
@@ -138,29 +146,10 @@ function Chords.display(json, shift)
   -- Paused/stopped inspection remains aligned with the exact cursor position.
   local display_position = position
   if (reaper.GetPlayState() & 1) ~= 0 then display_position = position + 0.002 end
-  -- Automatic maps are always shown in their stable form. The raw result is
-  -- useful only for diagnostics; showing it live makes the chord display
-  -- unusable due to incidental-note changes.
-  local display_events = data.status == "automatic" and data.simplified_events or
-    (Chords.is_simplified() and data.simplified_events or data.events)
-  local current, next_event = Chords.at(display_events, display_position)
-  local detected = Chords.transpose(current and current.chord, shift)
-  local now = reaper.time_precise()
-  -- Seeking, stopping or jumping to another song must show the chord at the
-  -- new position immediately; ordinary playback uses a short confirmation
-  -- window so passing notes cannot make the stage display flicker.
-  if not live.position or math.abs(display_position - live.position) > 1.2 then
-    live.chord, live.candidate, live.candidate_at = detected, nil, 0
-  elseif detected ~= live.chord then
-    if live.candidate ~= detected then
-      live.candidate, live.candidate_at = detected, now
-    elseif now - live.candidate_at >= 0.55 then
-      live.chord, live.candidate, live.candidate_at = detected, nil, 0
-    end
-  else
-    live.candidate, live.candidate_at = nil, 0
-  end
-  live.position = display_position
-  return live.chord or detected, Chords.transpose(next_event and next_event.chord, shift), data.status ~= "reviewed"
+  -- Automatic maps use the REAPER beat grid, preserving the real musical
+  -- position even in projects whose tempo changes during the arrangement.
+  local current, next_event = Chords.at(data.beat_events or data.events, display_position)
+  return Chords.transpose(current and current.chord, shift),
+    Chords.transpose(next_event and next_event.chord, shift), data.status ~= "reviewed"
 end
 return Chords
