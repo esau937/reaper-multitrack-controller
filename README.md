@@ -17,7 +17,7 @@ Controlador de multitracks para o Reaper DAW. Painel dockado na base da janela, 
 1. **Reaper 7.07+** (Windows ou macOS)
 2. **js_ReaScriptAPI** — extensão gratuita
 3. **ReaImGui** — extensão gratuita
-4. **SWS/S&M Extension** — necessária apenas para o recurso **LOUDNESS**
+4. **SWS/S&M Extension** — necessária para **LOUDNESS** e para a reproducao do **PAD**
 
 ### Como instalar as extensões (uma vez só)
 

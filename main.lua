@@ -172,7 +172,13 @@ local state = {
   sections         = {},
   setlist          = nil,
   pads = {
-    { name = "PAD", file = nil, playing = false, loop = true, volume = tonumber(reaper.GetExtState("MultitrackController", "pad_volume")) or 1.0 },
+    {
+      name = "PAD",
+      file = (reaper.GetExtState("MultitrackController", "pad_file") ~= "" and reaper.GetExtState("MultitrackController", "pad_file")) or nil,
+      playing = false,
+      loop = true,
+      volume = tonumber(reaper.GetExtState("MultitrackController", "pad_volume")) or 1.0,
+    },
   },
   hold             = false,
   auto_next        = false,

@@ -105,6 +105,26 @@ end
 local fading_out_previews = {}
 local fading_in_previews = {}
 
+-- A preview em fade ainda esta tocando no REAPER, mesmo depois de o PAD deixar
+-- de apontar para ela. Sempre a encerramos antes de iniciar outra preview do
+-- mesmo PAD; caso contrario, cliques repetidos acumulam audios sobrepostos.
+local function stop_preview(handle)
+  pcall(reaper.CF_Preview_Stop, handle)
+  fading_out_previews[handle] = nil
+  fading_in_previews[handle] = nil
+end
+
+local function stop_fading_previews_for(pad)
+  local pending = {}
+  for handle, fade in pairs(fading_out_previews) do
+    if fade.pad == pad then pending[#pending + 1] = handle end
+  end
+  for handle, fade in pairs(fading_in_previews) do
+    if fade.pad == pad then pending[#pending + 1] = handle end
+  end
+  for _, handle in ipairs(pending) do stop_preview(handle) end
+end
+
 local function pad_error(message)
   reaper.ShowMessageBox(message, "Multitrack Controller - PAD", 0)
 end
@@ -139,7 +159,12 @@ function Pads.stop(pad, fast)
   local handle = _preview_handles[pad]
   if handle then
     local duration = fast and 0.5 or 2.0
-    fading_out_previews[handle] = { start_time = reaper.time_precise(), duration = duration, start_vol = pad.volume or 1.0 }
+    fading_out_previews[handle] = {
+      pad = pad,
+      start_time = reaper.time_precise(),
+      duration = duration,
+      start_vol = pad.volume or 1.0,
+    }
     fading_in_previews[handle] = nil
     _preview_handles[pad] = nil
   end
@@ -151,6 +176,12 @@ function Pads.stop_all()
   local pending = {}
   for pad in pairs(_preview_handles) do pending[#pending + 1] = pad end
   for _, pad in ipairs(pending) do Pads.stop(pad, true) end
+  -- atexit e trocas rapidas tambem precisam encerrar as previews que ja
+  -- estavam saindo em fade.
+  local fading = {}
+  for handle in pairs(fading_out_previews) do fading[#fading + 1] = handle end
+  for handle in pairs(fading_in_previews) do fading[#fading + 1] = handle end
+  for _, handle in ipairs(fading) do stop_preview(handle) end
 end
 
 local function ensure_pad_track(pad)
@@ -191,7 +222,10 @@ local function ensure_pad_track(pad)
 end
 
 function Pads.play(pad, current_key)
-  if _preview_handles[pad] then Pads.stop(pad) end
+  -- Nao deixe um fade antigo continuar audivel quando o usuario troca de tom
+  -- ou aperta PAD novamente. Ha apenas uma preview por PAD.
+  if _preview_handles[pad] then Pads.stop(pad, true) end
+  stop_fading_previews_for(pad)
   for _, api in ipairs({"CF_CreatePreview", "CF_Preview_SetValue", "CF_Preview_GetValue", "CF_Preview_Play", "CF_Preview_Stop", "CF_Preview_SetOutputTrack"}) do
     if not reaper[api] then
       pad_error("O PAD requer a extensao SWS com a API CF_Preview. Atualize a SWS e reinicie o REAPER.")
@@ -243,7 +277,12 @@ function Pads.play(pad, current_key)
   end
   
   local target_v = pad.volume or 1.0
-  fading_in_previews[handle] = { start_time = reaper.time_precise(), duration = 2.0, target_vol = target_v }
+  fading_in_previews[handle] = {
+    pad = pad,
+    start_time = reaper.time_precise(),
+    duration = 0.15,
+    target_vol = target_v,
+  }
   
   _preview_handles[pad] = handle
   pad.playing = true
@@ -263,6 +302,9 @@ function Pads.set_volume(pad, volume)
   local handle = _preview_handles[pad]
   if handle then
     pcall(reaper.CF_Preview_SetValue, handle, "D_VOLUME", volume)
+  end
+  for _, fade in pairs(fading_in_previews) do
+    if fade.pad == pad then fade.target_vol = volume end
   end
 end
 
@@ -294,6 +336,7 @@ function Pads.configure(pad)
     local fname = path:match("([^/\\]+)$") or path
     fname = fname:gsub("%.[^.]+$", "")  -- remove extension
     if fname ~= "" then pad.name = fname end
+    reaper.SetExtState("MultitrackController", "pad_file", path, true)
   end
 end
 
