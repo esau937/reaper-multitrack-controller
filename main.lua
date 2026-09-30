@@ -217,6 +217,7 @@ local state = {
   show_render_modal = false,
   show_midi_mapping_modal = false,
   show_holyrics_modal = false,
+  automation_enabled = false,
   show_lyrics_preview = false,
   lyrics_preview_lead = tonumber(reaper.GetExtState("MultitrackController", "lyrics_preview_lead")) or 0,
   lyrics_preview_theme = reaper.GetExtState("MultitrackController", "lyrics_preview_theme") ~= "" and reaper.GetExtState("MultitrackController", "lyrics_preview_theme") or "ESCURO",
@@ -1328,30 +1329,28 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
 
   -- ================== COLUNA 1 ==================
 
-  -- MIDI (Linha 1)
+  -- MIDI (toggle de automacoes)
   reaper.ImGui_SetCursorScreenPos(ctx, marker_x, row1_y)
-  push_btn_style()
-  if reaper.ImGui_Button(ctx, "MIDI", marker_w, marker_h) then
-    reaper.ImGui_OpenPopup(ctx, "MidiActionsPopup")
+  if state.automation_enabled then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0xEC4899FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0xF472B6FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0xDB2777FF)
+  else
+    push_btn_style()
   end
-  pop_btn_style()
-  reaper.ImGui_SetNextWindowSizeConstraints(ctx, 190, 0, 9999, 9999)
-  if reaper.ImGui_BeginPopup(ctx, "MidiActionsPopup") then
-    if reaper.ImGui_Selectable(ctx, "MIDI Mapping", false, 0, 0, 26) then
-      state.show_midi_mapping_modal = true
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
-    if reaper.ImGui_Selectable(ctx, "Lyrics Preview", false, 0, 0, 26) then
-      state.show_lyrics_preview = true
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
-    reaper.ImGui_EndPopup(ctx)
+  if reaper.ImGui_Button(ctx, "MIDI", marker_w, marker_h) then
+    state.automation_enabled = not state.automation_enabled
+  end
+  if state.automation_enabled then
+    reaper.ImGui_PopStyleColor(ctx, 3)
+  else
+    pop_btn_style()
   end
 
   -- HOLYRICS (Linha 2)
   reaper.ImGui_SetCursorScreenPos(ctx, marker_x, row2_y)
   push_btn_style()
-  if reaper.ImGui_Button(ctx, "HOLYRICS", marker_w, marker_h) then
+  if reaper.ImGui_Button(ctx, "AO VIVO", marker_w, marker_h) then
     state.show_holyrics_modal = not state.show_holyrics_modal
   end
   pop_btn_style()
@@ -3280,7 +3279,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBg(), 0x000000FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBgActive(), 0x000000FF)
   
-  local visible, open = reaper.ImGui_Begin(ctx, "HOLYRICS", true)
+  local visible, open = reaper.ImGui_Begin(ctx, "AO VIVO", true)
   if not open then state.show_holyrics_modal = false end
 
   local actual_x, actual_y = reaper.ImGui_GetWindowPos(ctx)
@@ -3409,7 +3408,7 @@ local function loop()
     state.chord_analysis_status = ChordAnalyzer.ensure(active_project, state.current_proj_path, SCRIPT_PATH)
   end
 
-  if state.automation_model then
+  if state.automation_model and state.automation_enabled then
     local automation_position = current_play_state == 1 and reaper.GetPlayPosition() or reaper.GetCursorPosition()
     
     -- Aplica a antecipação global (configurada na engrenagem do preview) para o disparo real dos comandos
