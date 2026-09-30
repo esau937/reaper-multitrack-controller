@@ -1099,7 +1099,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local panel_y = draw_y
     local panel_h = draw_h
     local cover_size = math.min(panel_w - 8, panel_h - 36) -- espaco para titulo
-    cover_size = math.max(40, math.min(cover_size, 140))
+    cover_size = math.max(40, math.min(cover_size, 220))
     local cover_x = panel_x + (panel_w - cover_size) / 2
     local cover_y = panel_y + 4
     -- Capa do album
@@ -1349,6 +1349,22 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   local row1_y = marker_y - (marker_h + gap) * 2
   local row2_y = marker_y - marker_h - gap
 
+  -- Chords sit above the right-hand button grid, in the unused header space.
+  local pitch_state = state.pitch_projects[tostring(proj)]
+  local chord, next_chord, automatic = Chords.display(json, pitch_state and pitch_state.offset or 0)
+  if chord == "SEM MAPA" and state.chord_analysis_status then
+    chord = string.upper(state.chord_analysis_status)
+  end
+  local chord_y = row1_y - 48
+  reaper.ImGui_DrawList_PushClipRect(draw_list, marker_x, chord_y, marker_x + combined_w, row1_y - 2, true)
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y, C.text_dim, automatic and (Chords.is_simplified() and "AUTO · SIMPLES" or "ACORDE · AUTO") or "ACORDE")
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y, C.text_dim, "PRÓXIMO")
+  push_font_compat(font_large, 18)
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y + 19, C.accent, chord)
+  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y + 19, C.text, next_chord)
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_DrawList_PopClipRect(draw_list)
+
   -- Modo ao vivo: painel direito exibe preview do Holyrics
   if state.live_mode then
     local right_x = marker_x
@@ -1390,21 +1406,6 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     return  -- nao desenha os botoes normais
   end
 
-  -- Chords sit above the right-hand button grid, in the unused header space.
-  local pitch_state = state.pitch_projects[tostring(proj)]
-  local chord, next_chord, automatic = Chords.display(json, pitch_state and pitch_state.offset or 0)
-  if chord == "SEM MAPA" and state.chord_analysis_status then
-    chord = string.upper(state.chord_analysis_status)
-  end
-  local chord_y = row1_y - 48
-  reaper.ImGui_DrawList_PushClipRect(draw_list, marker_x, chord_y, marker_x + combined_w, row1_y - 2, true)
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y, C.text_dim, automatic and (Chords.is_simplified() and "AUTO · SIMPLES" or "ACORDE · AUTO") or "ACORDE")
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y, C.text_dim, "PRÓXIMO")
-  push_font_compat(font_large, 18)
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y + 19, C.accent, chord)
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y + 19, C.text, next_chord)
-  reaper.ImGui_PopFont(ctx)
-  reaper.ImGui_DrawList_PopClipRect(draw_list)
 
 
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 8.0)
@@ -2274,6 +2275,24 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   end
   if reaper.ImGui_Button(ctx, "CLICK", click_w, bh) then toggle_click_duck() end
   if is_click then reaper.ImGui_PopStyleColor(ctx, 2) else pop_btn_style() end
+
+  -- Botao ENSAIO / AO VIVO (modo ensaio) na barra de transporte
+  reaper.ImGui_SameLine(ctx, 0, 8)
+  if state.live_mode then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0xEC4899FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0xF472B6FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0xDB2777FF)
+  else
+    push_btn_style()
+  end
+  if reaper.ImGui_Button(ctx, state.live_mode and "ENSAIO" or "AO VIVO", click_w, bh) then
+    state.live_mode = not state.live_mode
+  end
+  if state.live_mode then
+    reaper.ImGui_PopStyleColor(ctx, 3)
+  else
+    pop_btn_style()
+  end
 
   -- METRONOMO VISUAL
   reaper.ImGui_SetCursorScreenPos(ctx, center_x + 524, y)
