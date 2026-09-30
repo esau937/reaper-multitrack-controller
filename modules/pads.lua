@@ -261,19 +261,6 @@ function Pads.play(pad, current_key, fade_in_duration)
     return false
   end
   
-  local project, track = ensure_pad_track(pad)
-  if not track then
-    reaper.PCM_Source_Destroy(src)
-    pad_error("Nao foi possivel criar a faixa do PAD.")
-    return false
-  end
-
-  -- Re-route any fading out previews to the newly active track. 
-  -- This prevents REAPER from muting them when switching tabs (projects).
-  for old_handle, _ in pairs(fading_out_previews) do
-    pcall(reaper.CF_Preview_SetOutputTrack, old_handle, project, track)
-  end
-
   -- CF_CreatePreview duplicates the source; release our original source.
   local created, handle = pcall(reaper.CF_CreatePreview, src)
   reaper.PCM_Source_Destroy(src)
@@ -285,7 +272,10 @@ function Pads.play(pad, current_key, fade_in_duration)
     if not reaper.CF_Preview_SetValue(handle, "B_LOOP", pad.loop and 1 or 0) then return false end
     -- Começa com volume 0 para o fade-in suave manual
     if not reaper.CF_Preview_SetValue(handle, "D_VOLUME", 0.0) then return false end
-    if not reaper.CF_Preview_SetOutputTrack(handle, project, track) then return false end
+    -- A preview ligada a uma faixa de projeto e silenciada quando outra aba
+    -- vira ativa. A saida direta preserva a preview durante a mudanca de aba,
+    -- permitindo concluir o fade-out antes do fade-in do novo tom.
+    if not reaper.CF_Preview_SetValue(handle, "I_OUTCHAN", 0) then return false end
     return reaper.CF_Preview_Play(handle)
   end)
   if not ok or not started then
@@ -360,11 +350,7 @@ function Pads.is_active_or_transitioning(pad)
 end
 
 function Pads.show_routing(pad)
-  local project, track = ensure_pad_track(pad)
-  if track then
-    reaper.SetOnlyTrackSelected(track)
-    reaper.Main_OnCommand(40293, 0) -- Track: View routing and I/O for current/last touched track
-  end
+  pad_error("O PAD usa a saida direta principal para manter o fade ao trocar de musica. Ajuste essa saida em Preferences > Audio > Device do REAPER.")
 end
 
 function Pads.set_volume(pad, volume)
