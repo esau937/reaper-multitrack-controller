@@ -275,7 +275,7 @@ function Pads.play(pad, current_key, fade_in_duration)
     -- A preview ligada a uma faixa de projeto e silenciada quando outra aba
     -- vira ativa. A saida direta preserva a preview durante a mudanca de aba,
     -- permitindo concluir o fade-out antes do fade-in do novo tom.
-    if not reaper.CF_Preview_SetValue(handle, "I_OUTCHAN", 0) then return false end
+    if not reaper.CF_Preview_SetValue(handle, "I_OUTCHAN", pad.output_channel or 0) then return false end
     return reaper.CF_Preview_Play(handle)
   end)
   if not ok or not started then
@@ -351,6 +351,18 @@ end
 
 function Pads.show_routing(pad)
   pad_error("O PAD usa a saida direta principal para manter o fade ao trocar de musica. Ajuste essa saida em Preferences > Audio > Device do REAPER.")
+end
+
+--- Define o primeiro canal fisico do par estereo (zero-based na API SWS).
+function Pads.set_output_channel(pad, channel)
+  channel = math.max(0, math.floor(tonumber(channel) or 0))
+  -- Um par estereo sempre comeca em canal impar para o usuario (1/2, 3/4...).
+  if channel % 2 ~= 0 then channel = channel - 1 end
+  pad.output_channel = channel
+  local handle = _preview_handles[pad]
+  if handle then pcall(reaper.CF_Preview_SetValue, handle, "I_OUTCHAN", channel) end
+  reaper.SetExtState("MultitrackController", "pad_output_channel", tostring(channel), true)
+  return channel
 end
 
 function Pads.set_volume(pad, volume)
