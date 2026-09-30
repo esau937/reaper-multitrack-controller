@@ -310,8 +310,8 @@ end
 --- Troca de pad entre musicas: sai por completo antes de iniciar o novo.
 -- Nao use Pads.play aqui, pois ele reinicia a preview imediatamente.
 function Pads.transition(pad, current_key)
-  local fade_out_duration = 1.0
-  local fade_in_duration = 1.0
+  local fade_out_duration = 1.5
+  local fade_in_duration = 1.5
   pending_starts[pad] = nil
 
   if _preview_handles[pad] then
