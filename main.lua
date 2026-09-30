@@ -218,6 +218,7 @@ local state = {
   show_midi_mapping_modal = false,
   show_holyrics_modal = false,
   automation_enabled = false,
+  live_mode = false,
   show_lyrics_preview = false,
   lyrics_preview_lead = tonumber(reaper.GetExtState("MultitrackController", "lyrics_preview_lead")) or 0,
   lyrics_preview_theme = reaper.GetExtState("MultitrackController", "lyrics_preview_theme") ~= "" and reaper.GetExtState("MultitrackController", "lyrics_preview_theme") or "ESCURO",
@@ -1091,7 +1092,47 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   local grid_x = wx + margin_x
   local grid_w = draw_x - grid_x - 12 -- 12px de respiro antes da onda
   
-  if grid_w > 100 then -- Só desenha se houver espaço (usuário não escondeu o TCP)
+  if state.live_mode then
+    -- Modo ao vivo: substituir painel esquerdo por capa + titulo
+    local panel_x = grid_x
+    local panel_w = grid_w
+    local panel_y = draw_y
+    local panel_h = draw_h
+    local cover_size = math.min(panel_w - 8, panel_h - 36) -- espaco para titulo
+    cover_size = math.max(40, math.min(cover_size, 140))
+    local cover_x = panel_x + (panel_w - cover_size) / 2
+    local cover_y = panel_y + 4
+    -- Capa do album
+    if state.cover_image and state.cover_image_w > 0 then
+      local iw, ih = state.cover_image_w, state.cover_image_h
+      local scale = math.min(cover_size / iw, cover_size / ih)
+      local dw, dh = math.floor(iw * scale), math.floor(ih * scale)
+      local ix = panel_x + (panel_w - dw) / 2
+      local iy = cover_y
+      reaper.ImGui_SetCursorScreenPos(ctx, ix, iy)
+      reaper.ImGui_Image(ctx, state.cover_image, dw, dh)
+      cover_y = iy + dh + 4
+    else
+      -- Placeholder cinza se nao houver capa
+      reaper.ImGui_DrawList_AddRectFilled(draw_list, cover_x, cover_y, cover_x + cover_size, cover_y + cover_size, 0x2A2A2AFF, 8)
+      reaper.ImGui_DrawList_AddRect(draw_list, cover_x, cover_y, cover_x + cover_size, cover_y + cover_size, 0x444444FF, 8, 0, 1)
+      local lbl = "SEM CAPA"
+      local lw = reaper.ImGui_CalcTextSize(ctx, lbl)
+      reaper.ImGui_DrawList_AddText(draw_list, cover_x + (cover_size - lw) / 2, cover_y + cover_size / 2 - 7, 0x555555FF, lbl)
+      cover_y = cover_y + cover_size + 4
+    end
+    -- Titulo e artista
+    local sname = state.current_proj_name:gsub("%.[Rr][Pp][Pp]$", "")
+    local artist, title = sname:match("^(.-)%s*-%s*(.+)$")
+    if not artist then artist = ""; title = sname end
+    -- Centraliza texto
+    local tw = reaper.ImGui_CalcTextSize(ctx, title)
+    reaper.ImGui_DrawList_AddText(draw_list, panel_x + (panel_w - tw) / 2, cover_y, 0xFFFFFFFF, title)
+    if artist ~= "" then
+      local aw = reaper.ImGui_CalcTextSize(ctx, artist)
+      reaper.ImGui_DrawList_AddText(draw_list, panel_x + (panel_w - aw) / 2, cover_y + 16, 0xAAAAAAAA, artist)
+    end
+  elseif grid_w > 100 then -- Só desenha se houver espaço (usuário não escondeu o TCP)
     local cols = 6
     local rows = 2
     local spacing = 4
@@ -1292,7 +1333,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   end
   
   -- =========================================================
-  -- Botões MARKER, LOUDNESS e SALVAR ao lado da Waveform
+  -- Painel direito: botoes normais ou preview ao vivo
   -- =========================================================
   local marker_w = 84
   local marker_h = 48
@@ -1307,6 +1348,48 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
 
   local row1_y = marker_y - (marker_h + gap) * 2
   local row2_y = marker_y - marker_h - gap
+
+  -- Modo ao vivo: painel direito exibe preview do Holyrics
+  if state.live_mode then
+    local right_x = marker_x
+    local right_w = combined_w
+    local right_y = draw_y
+    local right_h = draw_h
+    reaper.ImGui_SetCursorScreenPos(ctx, right_x, right_y)
+    local model = state.automation_model
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), 0x0A0A0AFF)
+    if reaper.ImGui_BeginChild(ctx, "##live_right_preview", right_w, right_h, reaper.ImGui_ChildFlags_Borders()) then
+      if not model or not model.lyrics or #(model.lyrics.lines or {}) == 0 then
+        reaper.ImGui_TextDisabled(ctx, "Nenhuma letra mapeada.")
+      else
+        local transport_position = (reaper.GetPlayState() & 1 == 1) and reaper.GetPlayPosition() or reaper.GetCursorPosition()
+        local active_line_id = nil
+        if state.cue_engine and state.cue_engine.last_fired then
+          local last = state.cue_engine.last_fired
+          if last and last.action == "SHOW_LINE" then active_line_id = last.target end
+        end
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
+        reaper.ImGui_TextWrapped(ctx, "AO VIVO")
+        reaper.ImGui_PopStyleColor(ctx)
+        reaper.ImGui_Separator(ctx)
+        -- Mostra as linhas; destaca a linha ativa
+        for _, line in ipairs(model.lyrics.lines) do
+          local is_active = (line.id == active_line_id)
+          if is_active then
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x10B981FF)
+          end
+          reaper.ImGui_TextWrapped(ctx, line.text or "")
+          if is_active then
+            reaper.ImGui_PopStyleColor(ctx)
+          end
+        end
+      end
+      reaper.ImGui_EndChild(ctx)
+    end
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleVar(ctx)
+    return  -- nao desenha os botoes normais
+  end
 
   -- Chords sit above the right-hand button grid, in the unused header space.
   local pitch_state = state.pitch_projects[tostring(proj)]
@@ -1350,8 +1433,8 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   -- HOLYRICS (Linha 2)
   reaper.ImGui_SetCursorScreenPos(ctx, marker_x, row2_y)
   push_btn_style()
-  if reaper.ImGui_Button(ctx, "AO VIVO", marker_w, marker_h) then
-    -- funcao reservada para uso futuro
+  if reaper.ImGui_Button(ctx, state.live_mode and "ENSAIO" or "AO VIVO", marker_w, marker_h) then
+    state.live_mode = not state.live_mode
   end
   pop_btn_style()
 
