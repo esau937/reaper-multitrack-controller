@@ -1233,43 +1233,17 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     -- Altura do fader é 18px (FontSize(14) + padding(4)). Então usamos 18x18
     local gear_h = 18
     if reaper.ImGui_Button(ctx, "##pad_route", gear_w, gear_h) then
-       reaper.ImGui_OpenPopup(ctx, "Saida do PAD")
+       Pads.show_routing(pad)
     end
     local btn_min_x, btn_min_y = reaper.ImGui_GetItemRectMin(ctx)
     local btn_max_x, btn_max_y = reaper.ImGui_GetItemRectMax(ctx)
     -- Ajustamos o raio no desenho vetorial dinamicamente (18/2 = 9, então r=5)
     draw_gear_icon(draw_list, (btn_min_x + btn_max_x) / 2, (btn_min_y + btn_max_y) / 2, 0xFFFFFFFF, 5)
-    if reaper.ImGui_IsItemHovered(ctx) then reaper.ImGui_SetTooltip(ctx, "Escolher saida fisica do PAD") end
+    if reaper.ImGui_IsItemHovered(ctx) then reaper.ImGui_SetTooltip(ctx, "Abrir roteamento do PAD no REAPER") end
     
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleColor(ctx, 3)
 
-    -- O popup precisa pertencer a esta mesma janela/painel da engrenagem.
-    if reaper.ImGui_BeginPopup(ctx, "Saida do PAD") then
-      local selected_pair = (pad.output_channel or 0) + 1
-      reaper.ImGui_Text(ctx, "Saida fisica estereo do PAD")
-      reaper.ImGui_Separator(ctx)
-      reaper.ImGui_Text(ctx, string.format("Atual: %d/%d", selected_pair, selected_pair + 1))
-      reaper.ImGui_Dummy(ctx, 0, 4)
-      for _, first_channel in ipairs({1, 3, 5, 7, 9, 11, 13, 15}) do
-        local label = string.format("%d/%d", first_channel, first_channel + 1)
-        if reaper.ImGui_Selectable(ctx, label, selected_pair == first_channel) then
-          Pads.set_output_channel(pad, first_channel - 1)
-          reaper.ImGui_CloseCurrentPopup(ctx)
-        end
-        if first_channel == 7 then reaper.ImGui_Separator(ctx) end
-      end
-      reaper.ImGui_Separator(ctx)
-      local changed_output, typed_pair = reaper.ImGui_InputInt(ctx, "Outro primeiro canal", selected_pair, 2, 2)
-      if changed_output then
-        -- A interface usa 1/2, 3/4...; a API usa o indice inicial zero-based.
-        local normalized_pair = math.max(1, math.floor(typed_pair))
-        if normalized_pair % 2 == 0 then normalized_pair = normalized_pair - 1 end
-        Pads.set_output_channel(pad, normalized_pair - 1)
-      end
-      reaper.ImGui_EndPopup(ctx)
-    end
-    
     -- ==== TECLAS CROMÁTICAS (Bottom Half) ====
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
     

@@ -260,6 +260,16 @@ function Pads.play(pad, current_key, fade_in_duration)
     pad_error("Erro ao carregar: " .. file)
     return false
   end
+
+  -- A faixa PAD CONTROLLER e usada somente como configuracao visual de I/O.
+  -- A preview permanece em saida direta para sobreviver a troca de abas, mas
+  -- copia o primeiro hardware out definido pelo usuario nessa tela nativa.
+  local project, track = ensure_pad_track(pad)
+  if track and reaper.GetTrackNumSends(track, 1) > 0 then
+    local dst = reaper.GetTrackSendInfo_Value(track, 1, 0, "I_DSTCHAN")
+    pad.output_channel = math.floor(dst) % 1024
+    reaper.SetExtState("MultitrackController", "pad_output_channel", tostring(pad.output_channel), true)
+  end
   
   -- CF_CreatePreview duplicates the source; release our original source.
   local created, handle = pcall(reaper.CF_CreatePreview, src)
@@ -350,7 +360,12 @@ function Pads.is_active_or_transitioning(pad)
 end
 
 function Pads.show_routing(pad)
-  pad_error("O PAD usa a saida direta principal para manter o fade ao trocar de musica. Ajuste essa saida em Preferences > Audio > Device do REAPER.")
+  local _, track = ensure_pad_track(pad)
+  if track then
+    reaper.SetOnlyTrackSelected(track)
+    -- Track: View routing and I/O for current/last touched track
+    reaper.Main_OnCommand(40293, 0)
+  end
 end
 
 --- Define o primeiro canal fisico do par estereo (zero-based na API SWS).
