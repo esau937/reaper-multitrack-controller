@@ -86,10 +86,12 @@ local font = reaper.ImGui_CreateFont('Arial', 14)
 local font_large = reaper.ImGui_CreateFont('Arial', 18)
 local font_small = reaper.ImGui_CreateFont('Arial', 10)
 local font_preview = reaper.ImGui_CreateFont('Arial', 32)
+local font_preview_sm = reaper.ImGui_CreateFont('Arial', 18)
 reaper.ImGui_Attach(ctx, font)
 reaper.ImGui_Attach(ctx, font_large)
 reaper.ImGui_Attach(ctx, font_small)
 reaper.ImGui_Attach(ctx, font_preview)
+reaper.ImGui_Attach(ctx, font_preview_sm)
 
 -- PushFont requer o tamanho como terceiro argumento nas versões atuais do
 -- ReaImGui. Mantemos o tamanho local porque o REAPER valida os argumentos
@@ -1095,16 +1097,18 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   local grid_w = draw_x - grid_x - 12 -- 12px de respiro antes da onda
   
   if state.live_mode then
-    -- Modo ao vivo: substituir painel esquerdo por capa + titulo
+    -- Modo ao vivo: substituir painel esquerdo por capa + titulo como overlay
     local panel_x = grid_x
     local panel_w = grid_w
     local panel_y = draw_y
     local panel_h = draw_h
-    local cover_size = math.min(panel_w - 8, panel_h - 36) -- espaco para titulo
-    cover_size = math.max(40, math.min(cover_size, 220))
+    -- Capa ocupa toda a altura disponivel
+    local cover_size = math.min(panel_w - 4, panel_h - 4)
+    cover_size = math.max(40, cover_size)
     local cover_x = panel_x + (panel_w - cover_size) / 2
-    local cover_y = panel_y + 4
+    local cover_y = panel_y + 2
     -- Capa do album
+    local img_x, img_y, img_w, img_h = cover_x, cover_y, cover_size, cover_size
     if state.cover_image and state.cover_image_w > 0 then
       local iw, ih = state.cover_image_w, state.cover_image_h
       local scale = math.min(cover_size / iw, cover_size / ih)
@@ -1113,26 +1117,27 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
       local iy = cover_y
       reaper.ImGui_SetCursorScreenPos(ctx, ix, iy)
       reaper.ImGui_Image(ctx, state.cover_image, dw, dh)
-      cover_y = iy + dh + 4
+      img_x, img_y, img_w, img_h = ix, iy, dw, dh
     else
-      -- Placeholder cinza se nao houver capa
+      -- Placeholder cinza
       reaper.ImGui_DrawList_AddRectFilled(draw_list, cover_x, cover_y, cover_x + cover_size, cover_y + cover_size, 0x2A2A2AFF, 8)
       reaper.ImGui_DrawList_AddRect(draw_list, cover_x, cover_y, cover_x + cover_size, cover_y + cover_size, 0x444444FF, 8, 0, 1)
       local lbl = "SEM CAPA"
       local lw = reaper.ImGui_CalcTextSize(ctx, lbl)
       reaper.ImGui_DrawList_AddText(draw_list, cover_x + (cover_size - lw) / 2, cover_y + cover_size / 2 - 7, 0x555555FF, lbl)
-      cover_y = cover_y + cover_size + 4
     end
-    -- Titulo e artista
+    -- Titulo e artista: overlay semitransparente na parte inferior da capa
     local sname = state.current_proj_name:gsub("%.[Rr][Pp][Pp]$", "")
     local artist, title = sname:match("^(.-)%s*-%s*(.+)$")
     if not artist then artist = ""; title = sname end
-    -- Centraliza texto
+    local overlay_h = 36
+    local oy = img_y + img_h - overlay_h
+    reaper.ImGui_DrawList_AddRectFilled(draw_list, img_x, oy, img_x + img_w, img_y + img_h, 0x000000CC, 0, 0x0C)
     local tw = reaper.ImGui_CalcTextSize(ctx, title)
-    reaper.ImGui_DrawList_AddText(draw_list, panel_x + (panel_w - tw) / 2, cover_y, 0xFFFFFFFF, title)
+    reaper.ImGui_DrawList_AddText(draw_list, img_x + (img_w - tw) / 2, oy + 4, 0xFFFFFFFF, title)
     if artist ~= "" then
       local aw = reaper.ImGui_CalcTextSize(ctx, artist)
-      reaper.ImGui_DrawList_AddText(draw_list, panel_x + (panel_w - aw) / 2, cover_y + 16, 0xAAAAAAAA, artist)
+      reaper.ImGui_DrawList_AddText(draw_list, img_x + (img_w - aw) / 2, oy + 20, 0xCCCCCCFF, artist)
     end
   elseif grid_w > 100 then -- Só desenha se houver espaço (usuário não escondeu o TCP)
     local cols = 6
@@ -3261,7 +3266,7 @@ render_automation_preview = function(ctx, show_settings)
   reaper.ImGui_Separator(ctx)
 
   if not active_slide then
-    reaper.ImGui_Dummy(ctx, 0, preview_h * 0.32)
+    reaper.ImGui_Dummy(ctx, 0, show_settings and preview_h * 0.32 or 8)
     reaper.ImGui_TextColored(ctx, preview_dim, "Aguardando uma linha mapeada nesta região.")
   else
     if state.lyrics_preview_last_target ~= active_cue.target then
@@ -3278,15 +3283,17 @@ render_automation_preview = function(ctx, show_settings)
       local line = AutomationModel.get_line(model, line_id)
       if line then
         local is_active = line.id == active_cue.target
-        push_font_compat(font_preview, 32)
+        local use_font = show_settings and font_preview or font_preview_sm
+        local use_size = show_settings and 32 or 18
+        push_font_compat(use_font, use_size)
         local text_w = reaper.ImGui_CalcTextSize(ctx, line.text)
         reaper.ImGui_SetCursorPosX(ctx, math.max(20, (preview_w - text_w) / 2))
         reaper.ImGui_TextColored(ctx, with_alpha(is_active and HOLYRICS_MAPPED_GREEN or preview_text), line.text)
         reaper.ImGui_PopFont(ctx)
-        reaper.ImGui_Dummy(ctx, 0, 18)
+        reaper.ImGui_Dummy(ctx, 0, show_settings and 18 or 4)
       end
     end
-    reaper.ImGui_Dummy(ctx, 0, 22)
+    reaper.ImGui_Dummy(ctx, 0, show_settings and 22 or 6)
     reaper.ImGui_TextColored(ctx, with_alpha(preview_dim), active_slide.isTitle and "SLIDE DE TÍTULO" or "SLIDE " .. active_slide.displayId)
   end
   reaper.ImGui_EndChild(ctx)
