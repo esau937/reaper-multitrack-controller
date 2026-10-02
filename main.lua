@@ -3329,12 +3329,42 @@ render_automation_preview = function(ctx, show_settings)
   local preview_text = light_theme and 0x181818FF or C.text
   local preview_dim = light_theme and 0x666666FF or C.text_dim
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), preview_bg)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 8.0)
   reaper.ImGui_BeginChild(ctx, "##live_lyric_preview", 0, preview_h, reaper.ImGui_ChildFlags_Borders())
-  reaper.ImGui_TextColored(ctx, preview_text, "PRÉVIA AO VIVO")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, preview_dim, format_cue_time(transport_position))
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextColored(ctx, preview_dim, is_playing and "SINCRONIZADA COM PLAY" or "CURSOR PARADO")
+  if show_settings then
+    reaper.ImGui_TextColored(ctx, preview_text, "PRÉVIA AO VIVO")
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_TextColored(ctx, preview_dim, format_cue_time(transport_position))
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_TextColored(ctx, preview_dim, is_playing and "SINCRONIZADA COM PLAY" or "CURSOR PARADO")
+  else
+    local target = state.code_api_targets and state.code_api_targets[1]
+    local mon = target and state.connection_monitor and state.connection_monitor[1]
+    local now = reaper.time_precise()
+    local led_color, status_text
+    if not target then
+      led_color = 0x666666FF
+      status_text = "Nenhum destino configurado"
+    elseif not mon or mon.ok == nil then
+      led_color = 0x666666FF
+      status_text = target.name .. " (Aguardando...)"
+    elseif mon.ok then
+      local pulse = 0.65 + 0.35 * math.abs(math.sin(now * 2.5))
+      local g = math.floor(0xB9 * pulse)
+      led_color = 0x10000000 + g * 0x10000 + 0x8100 + 0xFF
+      status_text = target.name
+    else
+      led_color = 0xEF4444FF
+      status_text = target.name .. " (Offline)"
+    end
+    local cx, cy = reaper.ImGui_GetCursorScreenPos(ctx)
+    cx = cx + 8; cy = cy + 7
+    local dl = reaper.ImGui_GetWindowDrawList(ctx)
+    reaper.ImGui_DrawList_AddCircleFilled(dl, cx, cy, 5, led_color)
+    reaper.ImGui_Dummy(ctx, 16, 14)
+    reaper.ImGui_SameLine(ctx, 0, 4)
+    reaper.ImGui_TextColored(ctx, (mon and mon.ok) and 0x10B981FF or 0xAAAAAAFF, status_text)
+  end
   if show_settings then
     reaper.ImGui_SameLine(ctx, preview_w - 34)
     if reaper.ImGui_Button(ctx, "⚙##lyrics_preview_settings", 26, 22) then
@@ -3419,6 +3449,7 @@ render_automation_preview = function(ctx, show_settings)
     reaper.ImGui_TextColored(ctx, with_alpha(preview_dim), active_slide.isTitle and "SLIDE DE TÍTULO" or "SLIDE " .. active_slide.displayId)
   end
   reaper.ImGui_EndChild(ctx)
+  reaper.ImGui_PopStyleVar(ctx)
   reaper.ImGui_PopStyleColor(ctx)
 end
 
