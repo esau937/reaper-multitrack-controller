@@ -2708,14 +2708,14 @@ local function render_route_editor(ctx)
       elseif mon.ok then
         local pulse = 0.65 + 0.35 * math.abs(math.sin(now * 2.5))
         local g = math.floor(0xB9 * pulse)
-        led_color = (0x10 << 24) | (g << 16) | (0x81 << 8) | 0xFF
+        led_color = 0x10000000 + g * 0x10000 + 0x8100 + 0xFF
         status_text = "Online"
       else
         led_color = 0xEF4444FF
         status_text = "Offline"
       end
-      local cx = reaper.ImGui_GetCursorScreenPosX(ctx) + 7
-      local cy = reaper.ImGui_GetCursorScreenPosY(ctx) + 8
+      local cx, cy = reaper.ImGui_GetCursorScreenPos(ctx)
+      cx = cx + 7; cy = cy + 8
       local dl = reaper.ImGui_GetWindowDrawList(ctx)
       reaper.ImGui_DrawList_AddCircleFilled(dl, cx, cy, 6, led_color)
       reaper.ImGui_Dummy(ctx, 16, 14)
