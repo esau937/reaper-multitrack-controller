@@ -2783,6 +2783,24 @@ local function render_route_editor(ctx)
     
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleColor(ctx, 3)
+
+    -- Botao Conectar: preenche com localhost:8091 automaticamente
+    reaper.ImGui_SameLine(ctx, 0, 6)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x7C3AEDFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x8B5CF6FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x6D28D9FF)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
+    if reaper.ImGui_Button(ctx, "Conectar##notebook_" .. index, 90, 26) then
+      target.url = "http://localhost:8091"
+      target.status = nil
+      state.connection_monitor[index] = nil  -- Forca re-verificacao
+      save_holyrics_targets()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Define como localhost:8091 (Holyrics no mesmo notebook)")
+    end
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleColor(ctx, 3)
     
     if #state.code_api_targets > 1 then
       reaper.ImGui_SameLine(ctx)
@@ -2818,37 +2836,6 @@ local function render_route_editor(ctx)
   if reaper.ImGui_Button(ctx, "+ ADICIONAR HOLYRICS", 180, 32) then
     state.code_api_targets[#state.code_api_targets + 1] = { name = "Holyrics " .. (#state.code_api_targets + 1), url = "", token = "" }
     save_holyrics_targets()
-  end
-  reaper.ImGui_PopStyleVar(ctx)
-  reaper.ImGui_PopStyleColor(ctx, 3)
-  
-  reaper.ImGui_SameLine(ctx, 0, 8)
-
-  -- Botao NOTEBOOK: conecta automaticamente ao Holyrics local (localhost)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x7C3AEDFF)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x8B5CF6FF)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x6D28D9FF)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
-  if reaper.ImGui_Button(ctx, "CONECTAR NOTEBOOK", 180, 32) then
-    -- Verifica se ja existe uma entrada localhost
-    local found_local = false
-    for _, t in ipairs(state.code_api_targets or {}) do
-      if t.url and t.url:match("localhost") then
-        found_local = true
-        break
-      end
-    end
-    if not found_local then
-      state.code_api_targets[#state.code_api_targets + 1] = {
-        name = "Notebook",
-        url  = "http://localhost:8091",
-        token = ""
-      }
-      save_holyrics_targets()
-    end
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx, "Conecta ao Holyrics rodando neste notebook (localhost:8091).\nApenas informe o token do API Server.")
   end
   reaper.ImGui_PopStyleVar(ctx)
   reaper.ImGui_PopStyleColor(ctx, 3)
