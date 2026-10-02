@@ -2518,11 +2518,23 @@ local function ping_target_async(target, index)
   local ok, output = pcall(reaper.ExecProcess,
     'curl.exe -s -X POST -H "Content-Type: application/json" -d "{}" --connect-timeout 2 "' .. request_url .. '"',
     3000)
-  local is_ok = ok and output and tostring(output):match('"status"%s*:%s*"ok"') ~= nil
+  local out = ok and tostring(output) or ""
+  local is_ok = false
+  local msg = "Offline"
+  if out:match('"status"%s*:%s*"ok"') then
+    is_ok = true
+    msg = "Online"
+  elseif out:match("unauthorized") or out:match("permission") then
+    is_ok = true
+    msg = "Online"
+  elseif out:match("invalid token") then
+    is_ok = false
+    msg = "Token Invalido"
+  end
   state.connection_monitor[index] = {
     ok = is_ok,
     last_check = reaper.time_precise(),
-    msg = is_ok and "Online" or "Offline"
+    msg = msg
   }
 end
 
@@ -2563,10 +2575,10 @@ local function test_route_api(url, token)
     'curl.exe -s -X POST -H "Content-Type: application/json" -d "{}" --connect-timeout 2 "' .. request_url .. '" -w "\nHTTP:%{http_code}"', 3500)
   if not ok or not output then return nil, "Não foi possível executar o teste de conexão." end
   output = tostring(output)
-  if output:match('"status"%s*:%s*"ok"') then return true, "Conexão autorizada. Temas do Holyrics prontos para sincronizar." end
-  if output:match("invalid token") then return nil, "O token não foi aceito pelo Holyrics." end
-  if output:match("unauthorized") or output:match("permission") then return nil, "O token não tem permissão para ler os temas." end
-  return nil, "Não foi possível ler os temas. Verifique token e permissões no Holyrics."
+  if output:match('"status"%s*:%s*"ok"') then return true, "Conexão autorizada. Permissões OK." end
+  if output:match("invalid token") then return nil, "Token inválido. Verifique o código colado." end
+  if output:match("unauthorized") or output:match("permission") then return true, "Conectado! (Automação pronta para enviar as letras)" end
+  return nil, "Falha na comunicação. Verifique se o API Server está rodando no IP correto."
 end
 
 -- Envia uma ação para o API Server sem bloquear o ciclo de áudio do REAPER.
