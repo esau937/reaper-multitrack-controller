@@ -2743,6 +2743,37 @@ local function render_route_editor(ctx)
   reaper.ImGui_PopStyleVar(ctx)
   reaper.ImGui_PopStyleColor(ctx, 3)
   
+  reaper.ImGui_SameLine(ctx, 0, 8)
+
+  -- Botao NOTEBOOK: conecta automaticamente ao Holyrics local (localhost)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x7C3AEDFF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x8B5CF6FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x6D28D9FF)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
+  if reaper.ImGui_Button(ctx, "CONECTAR NOTEBOOK", 180, 32) then
+    -- Verifica se ja existe uma entrada localhost
+    local found_local = false
+    for _, t in ipairs(state.code_api_targets or {}) do
+      if t.url and t.url:match("localhost") then
+        found_local = true
+        break
+      end
+    end
+    if not found_local then
+      state.code_api_targets[#state.code_api_targets + 1] = {
+        name = "Notebook",
+        url  = "http://localhost:8091",
+        token = ""
+      }
+      save_holyrics_targets()
+    end
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Conecta ao Holyrics rodando neste notebook (localhost:8091).\nApenas informe o token do API Server.")
+  end
+  reaper.ImGui_PopStyleVar(ctx)
+  reaper.ImGui_PopStyleColor(ctx, 3)
+  
   reaper.ImGui_SameLine(ctx, 0, 16)
   
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x4F46E5FF)
