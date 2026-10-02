@@ -1559,11 +1559,6 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     end
     
     if reaper.ImGui_Selectable(ctx, "MIDI Mapping", false, 0, 0, 22) then
-      state.show_midi_mapping_modal = true
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
-    
-    if reaper.ImGui_Selectable(ctx, "Conexao Holyrics (Automacao)", false, 0, 0, 22) then
       state.show_holyrics_modal = true
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
@@ -3526,7 +3521,7 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   
   reaper.ImGui_SetNextWindowSize(ctx, 900, 650, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
-  local visible, open = reaper.ImGui_Begin(ctx, "Automacao / Holyrics", true, flags)
+  local visible, open = reaper.ImGui_Begin(ctx, "MIDI Mapping", true, flags)
   if not open then state.show_holyrics_modal = false end
 
   local actual_x, actual_y = reaper.ImGui_GetWindowPos(ctx)
@@ -3780,7 +3775,6 @@ local function loop()
         render_key_mapping_modal(ctx, win_x, win_y, win_w, win_h)
       render_add_custom_modal(ctx)
       render_render_modal(ctx, win_x, win_y, win_w, win_h)
-      render_midi_mapping_modal(ctx, win_x, win_y, win_w, win_h)
       render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       render_lyrics_preview_window(ctx, win_x, win_y, win_w, win_h)
     end)
