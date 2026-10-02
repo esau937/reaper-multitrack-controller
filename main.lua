@@ -2701,6 +2701,9 @@ local function render_route_editor(ctx)
             if target then
               target.url = ip_url
               target.status = nil -- Clear status to remove inline green text
+              if state.connection_monitor then
+                state.connection_monitor[state.scanner.target_index] = nil -- Força nova checagem
+              end
               save_holyrics_targets()
             end
             reaper.ImGui_CloseCurrentPopup(ctx)
