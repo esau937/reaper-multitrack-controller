@@ -2797,7 +2797,7 @@ local function render_route_editor(ctx)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x3B82F6FF)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x1D4ED8FF)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
-    if reaper.ImGui_Button(ctx, "TESTAR CONEXÃO", 130, 26) then
+    if reaper.ImGui_Button(ctx, "TESTAR CONEXÃO", 155, 28) then
       local ok, message = test_route_api(target.url, target.token)
       target.status = { ok = ok, message = message }
     end
@@ -2810,7 +2810,7 @@ local function render_route_editor(ctx)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x059669FF)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
     
-    if reaper.ImGui_Button(ctx, "BUSCAR IP NA REDE", 140, 26) then
+    if reaper.ImGui_Button(ctx, "BUSCAR IP NA REDE", 155, 28) then
       if not state.scanner.active then
         start_network_scan(index)
         target.status = nil -- Limpa o status feio
@@ -2827,7 +2827,7 @@ local function render_route_editor(ctx)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x8B5CF6FF)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x6D28D9FF)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
-    if reaper.ImGui_Button(ctx, "Conectar##notebook_" .. index, 90, 26) then
+    if reaper.ImGui_Button(ctx, "CONECTAR##notebook_" .. index, 155, 28) then
       target.url = "http://localhost:8091"
       target.status = nil
       state.connection_monitor[index] = nil  -- Forca re-verificacao
@@ -2845,7 +2845,7 @@ local function render_route_editor(ctx)
       reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x663333FF)
       reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x884444FF)
       reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
-      if reaper.ImGui_Button(ctx, "REMOVER", 90, 26) then remove_index = index end
+      if reaper.ImGui_Button(ctx, "REMOVER", 100, 28) then remove_index = index end
       reaper.ImGui_PopStyleVar(ctx)
       reaper.ImGui_PopStyleColor(ctx, 3)
     end
