@@ -223,6 +223,7 @@ local state = {
   show_holyrics_modal = false,
   automation_enabled = false,
   live_mode = false,
+  connection_monitor = {},  -- { [index] = { ok=bool, last_check=time } }
   show_lyrics_preview = false,
   lyrics_preview_lead = tonumber(reaper.GetExtState("MultitrackController", "lyrics_preview_lead")) or 0,
   lyrics_preview_theme = reaper.GetExtState("MultitrackController", "lyrics_preview_theme") ~= "" and reaper.GetExtState("MultitrackController", "lyrics_preview_theme") or "ESCURO",
@@ -2460,6 +2461,52 @@ local function process_network_scan()
   end
 end
 
+-- Monitor de conexao assíncrono: checa cada target a cada 15s
+-- Usa curl com timeout curto para nao bloquear o UI
+local CONNECTION_CHECK_INTERVAL = 15  -- segundos entre verificacoes
+
+local function ping_target_async(target, index)
+  if not reaper.ExecProcess then return end
+  local url = (target.url or ""):match("^%s*(.-)%s*$")
+  local token = (target.token or ""):match("^%s*(.-)%s*$")
+  if url == "" or token == "" then
+    state.connection_monitor[index] = { ok = false, last_check = reaper.time_precise(), msg = "Sem URL/token" }
+    return
+  end
+  if not url:match("^https?://[%w%._%-]+:%d+/?$") then
+    state.connection_monitor[index] = { ok = false, last_check = reaper.time_precise(), msg = "URL invalida" }
+    return
+  end
+  local request_url = url:gsub("/$", "") .. "/api/GetThemes?token=" .. token
+  local ok, output = pcall(reaper.ExecProcess,
+    'curl.exe -s -X POST -H "Content-Type: application/json" -d "{}" --connect-timeout 2 "' .. request_url .. '"',
+    3000)
+  local is_ok = ok and output and tostring(output):match('"status"%s*:%s*"ok"') ~= nil
+  state.connection_monitor[index] = {
+    ok = is_ok,
+    last_check = reaper.time_precise(),
+    msg = is_ok and "Online" or "Offline"
+  }
+end
+
+local function update_connection_monitors()
+  local now = reaper.time_precise()
+  for index, target in ipairs(state.code_api_targets or {}) do
+    local mon = state.connection_monitor[index]
+    local last = mon and mon.last_check or 0
+    if now - last > CONNECTION_CHECK_INTERVAL then
+      -- Marca como "checking" com timestamp para nao re-iniciar
+      if not state.connection_monitor[index] then
+        state.connection_monitor[index] = { ok = nil, last_check = now, msg = "Verificando..." }
+      else
+        state.connection_monitor[index].last_check = now
+        state.connection_monitor[index].msg = "Verificando..."
+      end
+      ping_target_async(target, index)
+    end
+  end
+end
+
 local function test_route_api(url, token)
   if (reaper.GetPlayState() & 1) == 1 then
     return nil, "Pare a reprodução antes de testar a conexão."
@@ -2648,8 +2695,40 @@ local function render_route_editor(ctx)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 8.0)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 16.0, 16.0)
     
-    reaper.ImGui_BeginChild(ctx, "card_"..index, 0, 110, reaper.ImGui_ChildFlags_Borders())
+    reaper.ImGui_BeginChild(ctx, "card_"..index, 0, 130, reaper.ImGui_ChildFlags_Borders())
     
+    -- LED de status de conexao
+    do
+      local mon = state.connection_monitor[index]
+      local now = reaper.time_precise()
+      local led_color, status_text
+      if not mon or mon.ok == nil then
+        led_color = 0x666666FF
+        status_text = "Aguardando..."
+      elseif mon.ok then
+        local pulse = 0.65 + 0.35 * math.abs(math.sin(now * 2.5))
+        local g = math.floor(0xB9 * pulse)
+        led_color = (0x10 << 24) | (g << 16) | (0x81 << 8) | 0xFF
+        status_text = "Online"
+      else
+        led_color = 0xEF4444FF
+        status_text = "Offline"
+      end
+      local cx = reaper.ImGui_GetCursorScreenPosX(ctx) + 7
+      local cy = reaper.ImGui_GetCursorScreenPosY(ctx) + 8
+      local dl = reaper.ImGui_GetWindowDrawList(ctx)
+      reaper.ImGui_DrawList_AddCircleFilled(dl, cx, cy, 6, led_color)
+      reaper.ImGui_Dummy(ctx, 16, 14)
+      reaper.ImGui_SameLine(ctx, 0, 4)
+      local txt_color = (mon and mon.ok) and 0x10B981FF or ((mon and mon.ok == false) and 0xEF4444FF or 0x888888FF)
+      reaper.ImGui_TextColored(ctx, txt_color, status_text)
+      if mon and mon.last_check and mon.last_check > 0 then
+        local next_check = math.max(0, math.ceil(CONNECTION_CHECK_INTERVAL - (now - mon.last_check)))
+        reaper.ImGui_SameLine(ctx, 0, 8)
+        reaper.ImGui_TextColored(ctx, C.text_dim, "(prox: " .. next_check .. "s)")
+      end
+    end
+
     -- Labels
     reaper.ImGui_TextColored(ctx, 0xAAAAAAFF, "NOME DA CONEXÃO")
     reaper.ImGui_SameLine(ctx, 150)
@@ -3476,6 +3555,9 @@ local function loop()
   
   -- Roda a máquina de estado do scanner de rede (1 IP por frame se ativo)
   process_network_scan()
+
+  -- Monitor de conexao: verifica status dos targets periodicamente
+  update_connection_monitors()
   
   -- Lógica do HOLD (Auto-Avanço de Aba)
   local current_play_state = reaper.GetPlayState() & 1
