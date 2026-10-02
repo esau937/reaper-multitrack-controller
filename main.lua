@@ -1559,6 +1559,11 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     end
     
     if reaper.ImGui_Selectable(ctx, "MIDI Mapping", false, 0, 0, 22) then
+      state.show_midi_mapping_modal = true
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    
+    if reaper.ImGui_Selectable(ctx, "Conexao Holyrics (Automacao)", false, 0, 0, 22) then
       state.show_holyrics_modal = true
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
@@ -2340,7 +2345,44 @@ local function render_top_bar(win_x, win_y, win_w, top_h)
   reaper.ImGui_PopStyleVar(ctx) -- Restaura o arredondamento padrão
 end
 
--- render_midi_mapping_modal removida: MIDI Mapping agora abre a janela AO VIVO
+local function render_midi_mapping_modal(ctx, win_x, win_y, win_w, win_h)
+  if not state.show_midi_mapping_modal then return end
+
+  reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w / 2), win_y + (win_h / 2), reaper.ImGui_Cond_Appearing(), 0.5, 0.5)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowRounding(), 8.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 16.0, 16.0)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), 0x1A1A1AF2)
+  
+  local flags = reaper.ImGui_WindowFlags_NoCollapse() | reaper.ImGui_WindowFlags_NoResize() | reaper.ImGui_WindowFlags_AlwaysAutoResize()
+  local visible, open = reaper.ImGui_Begin(ctx, "Configuracao de MIDI Mapping", true, flags)
+  if not open then state.show_midi_mapping_modal = false end
+  
+  if visible then
+    for i, sec in ipairs(user_sections) do
+      reaper.ImGui_PushItemWidth(ctx, 120)
+      if reaper.ImGui_BeginCombo(ctx, sec.name, get_note_name(sec.pitch)) then
+        for p = 0, 127 do
+          if reaper.ImGui_Selectable(ctx, get_note_name(p), p == sec.pitch) then
+            sec.pitch = p
+            save_user_sections()
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      reaper.ImGui_PopItemWidth(ctx)
+    end
+    
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x444444FF)
+    if reaper.ImGui_Button(ctx, "FECHAR", 120, 32) then
+      state.show_midi_mapping_modal = false
+    end
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_End(ctx)
+  end
+  reaper.ImGui_PopStyleColor(ctx, 1)
+  reaper.ImGui_PopStyleVar(ctx, 2)
+end
 
 local function format_cue_time(seconds)
   seconds = math.max(0, seconds or 0)
@@ -3482,7 +3524,9 @@ local function render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBg(), 0x000000FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBgActive(), 0x000000FF)
   
-  local visible, open = reaper.ImGui_Begin(ctx, "AO VIVO", true)
+  reaper.ImGui_SetNextWindowSize(ctx, 900, 650, reaper.ImGui_Cond_FirstUseEver())
+  local flags = reaper.ImGui_WindowFlags_NoCollapse()
+  local visible, open = reaper.ImGui_Begin(ctx, "Automacao / Holyrics", true, flags)
   if not open then state.show_holyrics_modal = false end
 
   local actual_x, actual_y = reaper.ImGui_GetWindowPos(ctx)
@@ -3736,6 +3780,7 @@ local function loop()
         render_key_mapping_modal(ctx, win_x, win_y, win_w, win_h)
       render_add_custom_modal(ctx)
       render_render_modal(ctx, win_x, win_y, win_w, win_h)
+      render_midi_mapping_modal(ctx, win_x, win_y, win_w, win_h)
       render_holyrics_modal(ctx, win_x, win_y, win_w, win_h)
       render_lyrics_preview_window(ctx, win_x, win_y, win_w, win_h)
     end)
