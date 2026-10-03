@@ -160,4 +160,83 @@ function Sections.go_to(pos, play)
   if play then reaper.OnPlayButton() end
 end
 
+-- ─── Marker ↔ Region linking ────────────────────────────────────────────────
+-- Cada seção criada pelo controlador é um PAR: uma região e um marker pontual
+-- na mesma posição e com o mesmo nome. Se o usuário apagar um dos dois, o
+-- outro precisa sumir junto. Guardamos o snapshot dos pares do último ciclo e
+-- comparamos com o estado atual do projeto.
+
+local link_snapshot = { proj = nil, pairs = {} }
+
+local function pair_key(pos, name)
+  return string.format("%.3f|%s", pos, name or "")
+end
+
+local function enumerate(proj)
+  local regions, markers = {}, {}
+  local i = 0
+  while true do
+    local ok, is_rgn, pos, _, name, idx = reaper.EnumProjectMarkers3(proj, i)
+    if ok == 0 then break end
+    local bucket = is_rgn and regions or markers
+    bucket[idx] = { pos = pos, name = name or "" }
+    i = i + 1
+  end
+  return regions, markers
+end
+
+local function build_pairs(regions, markers)
+  local by_key = {}
+  for idx, m in pairs(markers) do
+    local key = pair_key(m.pos, m.name)
+    by_key[key] = by_key[key] or {}
+    table.insert(by_key[key], idx)
+  end
+  local result = {}
+  for r_idx, r in pairs(regions) do
+    local list = by_key[pair_key(r.pos, r.name)]
+    if list and #list > 0 then
+      result[#result + 1] = { region = r_idx, marker = table.remove(list, 1) }
+    end
+  end
+  return result
+end
+
+--- Apaga o "irmão" de qualquer região/marker removido desde o último ciclo.
+-- Retorna true se algo foi apagado.
+function Sections.sync_linked(proj)
+  proj = proj or reaper.EnumProjects(-1)
+  local regions, markers = enumerate(proj)
+
+  -- Troca de projeto: apenas tira um novo snapshot, sem apagar nada.
+  if link_snapshot.proj ~= proj then
+    link_snapshot.proj = proj
+    link_snapshot.pairs = build_pairs(regions, markers)
+    return false
+  end
+
+  local to_delete = {}
+  for _, p in ipairs(link_snapshot.pairs) do
+    local has_rgn, has_mrk = regions[p.region] ~= nil, markers[p.marker] ~= nil
+    if not has_rgn and has_mrk then
+      to_delete[#to_delete + 1] = { idx = p.marker, is_rgn = false }
+    elseif has_rgn and not has_mrk then
+      to_delete[#to_delete + 1] = { idx = p.region, is_rgn = true }
+    end
+  end
+
+  if #to_delete > 0 then
+    reaper.Undo_BeginBlock2(proj)
+    for _, d in ipairs(to_delete) do
+      reaper.DeleteProjectMarker(proj, d.idx, d.is_rgn)
+    end
+    reaper.Undo_EndBlock2(proj, "Multitrack Controller: apagar marker/região vinculados", -1)
+    reaper.UpdateTimeline()
+    regions, markers = enumerate(proj)
+  end
+
+  link_snapshot.pairs = build_pairs(regions, markers)
+  return #to_delete > 0
+end
+
 return Sections

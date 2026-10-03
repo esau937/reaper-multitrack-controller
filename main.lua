@@ -733,6 +733,13 @@ local function update_state()
     refresh_other_covers(proj)
   end
 
+  -- Quando o MakerTrack fecha (Finalizar, Cancelar ou X), força recarregar
+  -- as seções, que ficaram congeladas durante a marcação.
+  if state._marking_was_open and not state.show_marker_modal then
+    state._proj_change = nil
+  end
+  state._marking_was_open = state.show_marker_modal
+
   -- Detect project change via state change counter
   local change = reaper.GetProjectStateChangeCount(proj)
   local _, proj_path = reaper.EnumProjects(-1, "")
@@ -770,7 +777,16 @@ local function update_state()
       end
     end
     
-    state.sections = Sections.get_from_project(proj)
+    -- Apagar uma região apaga o marker par (e vice-versa).
+    if Sections.sync_linked(proj) then
+      state._proj_change = reaper.GetProjectStateChangeCount(proj)
+    end
+
+    -- Durante a marcação (MakerTrack aberto) a waveform fica congelada:
+    -- as regiões só aparecem depois de FINALIZAR TIMECODE.
+    if not state.show_marker_modal then
+      state.sections = Sections.get_from_project(proj)
+    end
     refresh_project_cover(proj, proj_path)
     state.chord_analysis_status = ChordAnalyzer.status(proj_path)
   end
@@ -1986,10 +2002,8 @@ local function render_marker_modal(ctx)
       
       reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
       if reaper.ImGui_Button(ctx, sec.name, 220, 35) then
+        -- Só grava no projeto. A waveform permanece congelada até FINALIZAR.
         Sections.add_region_at_cursor(sec.name, sec.r, sec.g, sec.b)
-        
-        -- Atualiza a UI imediatamente para refletir a nova região
-        state.sections = Sections.get_from_project(0)
       end
       reaper.ImGui_PopStyleVar(ctx)
       reaper.ImGui_PopStyleColor(ctx, 4)
@@ -2015,8 +2029,14 @@ local function render_marker_modal(ctx)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), 0x2563EBFF)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 4.0)
     if reaper.ImGui_Button(ctx, "FINALIZAR TIMECODE", 220, 40) then
-      export_mapa_to_txt()
+      -- Fecha a sessão de marcação: o update_state recarrega as regiões na
+      -- waveform no próximo ciclo e a análise harmônica é refeita do zero.
       state.show_marker_modal = false
+      Sections.sync_linked(reaper.EnumProjects(-1))
+      ChordAnalyzer.reset(state.current_proj_path)
+      state.chord_analysis_status = "Aguardando nova análise"
+      state.chord_analysis_checked_at = 0
+      export_mapa_to_txt()
     end
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleColor(ctx, 3)
@@ -3752,7 +3772,7 @@ local function loop()
 
   -- Chords are generated once, only while stopped, from tracks named PIANO
   -- and BASS/BAIXO. Once the sidecar exists this is an inexpensive file check.
-  if frame_started - (state.chord_analysis_checked_at or 0) >= 2 then
+  if not state.show_marker_modal and frame_started - (state.chord_analysis_checked_at or 0) >= 2 then
     state.chord_analysis_checked_at = frame_started
     local active_project = reaper.EnumProjects(-1)
     state.chord_analysis_status = ChordAnalyzer.ensure(active_project, state.current_proj_path, SCRIPT_PATH)
