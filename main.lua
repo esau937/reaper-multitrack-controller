@@ -787,7 +787,11 @@ local function update_state()
     if not state.show_marker_modal then
       state.sections = Sections.get_from_project(proj)
     end
-    refresh_project_cover(proj, proj_path)
+    -- Varredura de disco atrás da capa: só ao trocar de projeto. Fazer isso a
+    -- cada mudança de estado (mute, volume...) causava micro-travadas na UI.
+    if is_new_proj then
+      refresh_project_cover(proj, proj_path)
+    end
     state.chord_analysis_status = ChordAnalyzer.status(proj_path)
   end
 end
@@ -2608,9 +2612,24 @@ local function process_network_scan()
   end
 end
 
--- Monitor de conexao assíncrono: checa cada target a cada 15s
--- Usa curl com timeout curto para nao bloquear o UI
+-- Monitor de conexao assíncrono: checa cada target a cada 15s.
+-- IMPORTANTE: nunca usar ExecProcess com timeout aqui. Ele bloqueia o loop do
+-- script até o curl terminar (até 3s com o Holyrics offline), congelando a UI
+-- enquanto a música continua tocando. O curl roda num processo oculto via
+-- wscript e o loop apenas verifica, a cada frame, se a resposta chegou.
 local CONNECTION_CHECK_INTERVAL = 15  -- segundos entre verificacoes
+local CONNECTION_CHECK_TIMEOUT  = 4   -- curl tem --max-time 2; margem para o wscript
+local PING_LAUNCHER = SCRIPT_PATH .. "modules" .. package.config:sub(1, 1) .. "holyrics_hidden.vbs"
+local ping_jobs = {}
+local ping_seq = 0
+
+local function classify_ping_response(out)
+  if out:match('"status"%s*:%s*"ok"') then return true, "Online" end
+  -- Token sem permissão de GetThemes ainda prova que o Holyrics respondeu.
+  if out:match("unauthorized") or out:match("permission") then return true, "Online" end
+  if out:match("invalid token") then return false, "Token Invalido" end
+  return false, "Offline"
+end
 
 local function ping_target_async(target, index)
   if not reaper.ExecProcess then return end
@@ -2620,46 +2639,77 @@ local function ping_target_async(target, index)
     state.connection_monitor[index] = { ok = false, last_check = reaper.time_precise(), msg = "Sem URL/token" }
     return
   end
-  if not url:match("^https?://[%w%._%-]+:%d+/?$") then
+  if not url:match("^https?://[%w%._%-]+:%d+/?$") or not token:match("^[%w_%-]+$") then
     state.connection_monitor[index] = { ok = false, last_check = reaper.time_precise(), msg = "URL invalida" }
     return
   end
+  if ping_jobs[index] then return end -- já existe uma verificação em andamento
+
+  local now = reaper.time_precise()
+  ping_seq = ping_seq + 1
+  local base = reaper.GetResourcePath() .. "/holyrics-ping-" .. index .. "-" .. ping_seq
+  local request, response = base .. ".json", base .. ".response"
+  local file = io.open(request, "wb")
+  if not file then return end
+  file:write("{}")
+  file:close()
+  os.remove(response)
+
   local request_url = url:gsub("/$", "") .. "/api/GetThemes?token=" .. token
-  local ok, output = pcall(reaper.ExecProcess,
-    'curl.exe -s -X POST -H "Content-Type: application/json" -d "{}" --connect-timeout 2 "' .. request_url .. '"',
-    3000)
-  local out = ok and tostring(output) or ""
-  local is_ok = false
-  local msg = "Offline"
-  if out:match('"status"%s*:%s*"ok"') then
-    is_ok = true
-    msg = "Online"
-  elseif out:match("unauthorized") or out:match("permission") then
-    is_ok = true
-    msg = "Online"
-  elseif out:match("invalid token") then
-    is_ok = false
-    msg = "Token Invalido"
+  local system_dir = (os.getenv("SystemRoot") or "C:/Windows") .. "/System32/"
+  local command = '"' .. system_dir .. 'wscript.exe" //B //NoLogo "' .. PING_LAUNCHER .. '" "' ..
+    system_dir .. 'curl.exe" "' .. request .. '" "' .. response .. '" "' .. request_url .. '"'
+  -- Timeout -1: dispara e retorna imediatamente.
+  local started = pcall(reaper.ExecProcess, command, -1)
+  if not started then
+    os.remove(request)
+    state.connection_monitor[index] = { ok = false, last_check = now, msg = "Offline" }
+    return
   end
-  state.connection_monitor[index] = {
-    ok = is_ok,
-    last_check = reaper.time_precise(),
-    msg = msg
-  }
+  ping_jobs[index] = { request = request, response = response, deadline = now + CONNECTION_CHECK_TIMEOUT }
+end
+
+-- Chamado a cada frame: só lê arquivos pequenos, nunca espera por rede.
+local function poll_ping_jobs()
+  local now = reaper.time_precise()
+  for index, job in pairs(ping_jobs) do
+    local file = io.open(job.response, "rb")
+    local body = file and file:read("*a") or ""
+    if file then file:close() end
+    local finished = body ~= "" and (body:find("}", 1, true) or body:find("invalid token", 1, true))
+    if finished or now >= job.deadline then
+      local is_ok, msg = classify_ping_response(body)
+      state.connection_monitor[index] = { ok = is_ok, last_check = now, msg = msg }
+      ping_jobs[index] = nil
+      -- Se o curl ainda estiver com o arquivo aberto a remoção falha; tenta de novo depois.
+      if not os.remove(job.response) or not os.remove(job.request) then
+        state._ping_cleanup = state._ping_cleanup or {}
+        table.insert(state._ping_cleanup, { at = now + 3, job.request, job.response })
+      end
+    end
+  end
+  if state._ping_cleanup then
+    for i = #state._ping_cleanup, 1, -1 do
+      local entry = state._ping_cleanup[i]
+      if now >= entry.at then
+        os.remove(entry[1]); os.remove(entry[2])
+        table.remove(state._ping_cleanup, i)
+      end
+    end
+  end
 end
 
 local function update_connection_monitors()
+  poll_ping_jobs()
   local now = reaper.time_precise()
   for index, target in ipairs(state.code_api_targets or {}) do
     local mon = state.connection_monitor[index]
     local last = mon and mon.last_check or 0
-    if now - last > CONNECTION_CHECK_INTERVAL then
-      -- Marca como "checking" com timestamp para nao re-iniciar
+    if not ping_jobs[index] and now - last > CONNECTION_CHECK_INTERVAL then
       if not state.connection_monitor[index] then
         state.connection_monitor[index] = { ok = nil, last_check = now, msg = "Verificando..." }
       else
         state.connection_monitor[index].last_check = now
-        state.connection_monitor[index].msg = "Verificando..."
       end
       ping_target_async(target, index)
     end
