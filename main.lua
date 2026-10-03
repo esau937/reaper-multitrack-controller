@@ -701,6 +701,7 @@ local function refresh_other_covers(current_proj)
       if cover_path then
         local img = reaper.ImGui_CreateImage(cover_path)
         if img then
+          pcall(reaper.ImGui_Attach, ctx, img)
           table.insert(state.other_covers, { image = img, name = name, path = cover_path, proj = proj })
         end
       else
