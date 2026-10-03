@@ -1150,12 +1150,13 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local panel_y = draw_y
     local panel_h = wh - 10 -- Permite usar a altura real da janela em vez de travar em 152px
     -- Reserva espaco para titulo (14px) + artista (12px) + margens
-    local text_reserve = 70
-    local cover_size = math.min(panel_w - 4, panel_h - text_reserve - 20)
+    local text_reserve = 50
+    local cover_size = math.min(panel_w - 4, panel_h - text_reserve - 10)
+    cover_size = math.min(cover_size, math.max(100, panel_w * 0.55)) -- Limita para deixar espaco para a setlist na esquerda
     cover_size = math.max(40, cover_size)
     local axis_x = panel_x + panel_w - 16 - (cover_size / 2)
     local cover_x = axis_x - (cover_size / 2)
-    local cover_y = panel_y + 16 -- Joga a capa 16px mais para baixo
+    local cover_y = panel_y -- Cola o topo da capa no topo da waveform
     local corner_r = 8  -- raio dos cantos arredondados
     -- Capa do album com cantos arredondados
     local text_y = cover_y + cover_size + 6
@@ -1206,31 +1207,43 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     end
 
     if state.other_covers and #state.other_covers > 0 then
-      local num = #state.other_covers
-      local mini_size = 28
-      local spacing = 8
-      local total_w = (num * mini_size) + ((num - 1) * spacing)
-      local start_x = axis_x - (total_w / 2)
-      local start_y = text_y + 34
-      
-      for i, c in ipairs(state.other_covers) do
-        local mx = start_x + (i - 1) * (mini_size + spacing)
-        if c.image then
-          local ok_img = pcall(reaper.ImGui_DrawList_AddImageRounded, draw_list, c.image, mx, start_y, mx + mini_size, start_y + mini_size, 0, 0, 1, 1, 0xFFFFFFFF, 4)
-          if not ok_img then
-            reaper.ImGui_SetCursorScreenPos(ctx, mx, start_y)
-            reaper.ImGui_Image(ctx, c.image, mini_size, mini_size)
+      local list_x = panel_x
+      local list_y = panel_y + 4
+      local item_h = 32
+      local spacing = 12
+      local list_w = (cover_x - 16) - list_x
+      if list_w > 80 then -- Só desenha a lista se houver espaço razoável
+        for i, c in ipairs(state.other_covers) do
+          if c.image then
+            local ok_img = pcall(reaper.ImGui_DrawList_AddImageRounded, draw_list, c.image, list_x, list_y, list_x + item_h, list_y + item_h, 0, 0, 1, 1, 0xFFFFFFFF, 4)
+            if not ok_img then
+              reaper.ImGui_SetCursorScreenPos(ctx, list_x, list_y)
+              reaper.ImGui_Image(ctx, c.image, item_h, item_h)
+            end
+          else
+            reaper.ImGui_DrawList_AddRectFilled(draw_list, list_x, list_y, list_x + item_h, list_y + item_h, 0x333333FF, 4)
+            reaper.ImGui_DrawList_AddRect(draw_list, list_x, list_y, list_x + item_h, list_y + item_h, 0x555555FF, 4, 0, 1)
           end
-        else
-          reaper.ImGui_DrawList_AddRectFilled(draw_list, mx, start_y, mx + mini_size, start_y + mini_size, 0x333333FF, 4)
-          reaper.ImGui_DrawList_AddRect(draw_list, mx, start_y, mx + mini_size, start_y + mini_size, 0x555555FF, 4, 0, 1)
-        end
-        local cx, cy = reaper.ImGui_GetMousePos(ctx)
-        if cx >= mx and cx <= mx + mini_size and cy >= start_y and cy <= start_y + mini_size then
-          reaper.ImGui_SetTooltip(ctx, c.name)
-          if reaper.ImGui_IsMouseClicked(ctx, 0) then
-            reaper.SelectProjectInstance(c.proj)
+          
+          -- Titulo ao lado
+          local txt_x = list_x + item_h + 8
+          local txt_w = list_w - item_h - 8
+          local cname = truncate(c.name, txt_w)
+          local tw, th = reaper.ImGui_CalcTextSize(ctx, cname)
+          local txt_y = list_y + (item_h - th) / 2
+          reaper.ImGui_DrawList_AddText(draw_list, txt_x, txt_y, 0xCCCCCCFF, cname)
+          
+          -- Hover & Click Area
+          local cx, cy = reaper.ImGui_GetMousePos(ctx)
+          if cx >= list_x and cx <= list_x + list_w and cy >= list_y and cy <= list_y + item_h then
+            reaper.ImGui_DrawList_AddRectFilled(draw_list, list_x - 4, list_y - 2, list_x + list_w + 4, list_y + item_h + 2, 0xFFFFFF15, 4)
+            reaper.ImGui_SetTooltip(ctx, "Mudar para: " .. c.name)
+            if reaper.ImGui_IsMouseClicked(ctx, 0) then
+              reaper.SelectProjectInstance(c.proj)
+            end
           end
+          
+          list_y = list_y + item_h + spacing
         end
       end
     end
