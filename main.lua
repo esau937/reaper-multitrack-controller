@@ -1148,13 +1148,13 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local panel_x = grid_x
     local panel_w = grid_w
     local panel_y = draw_y
-    local panel_h = draw_h
+    local panel_h = wh - 10 -- Permite usar a altura real da janela em vez de travar em 152px
     -- Reserva espaco para titulo (14px) + artista (12px) + margens
     local text_reserve = 70
-    local cover_size = math.min(panel_w - 4, panel_h - text_reserve - 4)
+    local cover_size = math.min(panel_w - 4, panel_h - text_reserve - 20)
     cover_size = math.max(40, cover_size)
     local cover_x = panel_x + (panel_w - cover_size) / 2
-    local cover_y = panel_y + 2
+    local cover_y = panel_y + 16 -- Joga a capa 16px mais para baixo
     local corner_r = 8  -- raio dos cantos arredondados
     -- Capa do album com cantos arredondados
     local text_y = cover_y + cover_size + 6
