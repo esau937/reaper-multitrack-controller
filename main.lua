@@ -1153,7 +1153,8 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local text_reserve = 70
     local cover_size = math.min(panel_w - 4, panel_h - text_reserve - 20)
     cover_size = math.max(40, cover_size)
-    local cover_x = panel_x + (panel_w - cover_size) / 2
+    local axis_x = panel_x + panel_w - 16 - (cover_size / 2)
+    local cover_x = axis_x - (cover_size / 2)
     local cover_y = panel_y + 16 -- Joga a capa 16px mais para baixo
     local corner_r = 8  -- raio dos cantos arredondados
     -- Capa do album com cantos arredondados
@@ -1162,7 +1163,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
       local iw, ih = state.cover_image_w, state.cover_image_h
       local scale = math.min(cover_size / iw, cover_size / ih)
       local dw, dh = math.floor(iw * scale), math.floor(ih * scale)
-      local ix = panel_x + (panel_w - dw) / 2
+      local ix = axis_x - (dw / 2)
       local iy = cover_y
       -- Desenha imagem com cantos arredondados via DrawList
       local ok_img, _ = pcall(reaper.ImGui_DrawList_AddImageRounded, draw_list, state.cover_image, ix, iy, ix + dw, iy + dh, 0, 0, 1, 1, 0xFFFFFFFF, corner_r)
@@ -1197,11 +1198,11 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     end
     local ttxt = truncate(title, max_w)
     local tw = reaper.ImGui_CalcTextSize(ctx, ttxt)
-    reaper.ImGui_DrawList_AddText(draw_list, panel_x + (panel_w - tw) / 2, text_y, 0xFFFFFFFF, ttxt)
+    reaper.ImGui_DrawList_AddText(draw_list, axis_x - (tw / 2), text_y, 0xFFFFFFFF, ttxt)
     if artist ~= "" then
       local atxt = truncate(artist, max_w)
       local aw = reaper.ImGui_CalcTextSize(ctx, atxt)
-      reaper.ImGui_DrawList_AddText(draw_list, panel_x + (panel_w - aw) / 2, text_y + 16, 0xAAAAAAFF, atxt)
+      reaper.ImGui_DrawList_AddText(draw_list, axis_x - (aw / 2), text_y + 16, 0xAAAAAAFF, atxt)
     end
 
     if state.other_covers and #state.other_covers > 0 then
@@ -1209,7 +1210,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
       local mini_size = 28
       local spacing = 8
       local total_w = (num * mini_size) + ((num - 1) * spacing)
-      local start_x = panel_x + (panel_w - total_w) / 2
+      local start_x = axis_x - (total_w / 2)
       local start_y = text_y + 34
       
       for i, c in ipairs(state.other_covers) do
