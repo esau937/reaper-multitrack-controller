@@ -926,6 +926,10 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   
   -- Opcional: mantem a funcionalidade do Grid Lock apenas para congelar o Reaper
   if state.grid_lock and state.locked_start and state.locked_end then
+    -- Se o auto-scroll (1002) estiver ativo, ele vai brigar com o Grid Lock e causar travadas. Desliga.
+    if reaper.GetToggleCommandState(1002) == 1 then
+      reaper.Main_OnCommand(1002, 0)
+    end
     local view_start, view_end = reaper.GetSet_ArrangeView2(0, false, 0, 0, 0, 0)
     if math.abs(view_start - state.locked_start) > 0.000001 or
        math.abs(view_end - state.locked_end) > 0.000001 then
@@ -3194,7 +3198,30 @@ local function render_automation_sync_editor(ctx)
   local lyric_header_x, lyric_header_y = reaper.ImGui_GetCursorScreenPos(ctx)
   local lyric_header_w = reaper.ImGui_GetContentRegionAvail(ctx)
   reaper.ImGui_Text(ctx, "LETRA DA MÚSICA")
+  
+  if state.holyrics_remote_status or (state.code_api_targets and state.code_api_targets[1] and state.code_api_targets[1].status) then
+    reaper.ImGui_SameLine(ctx, 0, 16)
+    local status = state.holyrics_remote_status
+    if state.code_api_targets and state.code_api_targets[1] and state.code_api_targets[1].status then
+      -- Sobrescreve com o status assíncrono real do transporte
+      status = state.code_api_targets[1].status
+    end
+    if status then
+      local color = status.ok and HOLYRICS_MAPPED_GREEN or C.red
+      reaper.ImGui_TextColored(ctx, color, status.message or "")
+    end
+  end
+  
   -- Keep the primary action first and the destructive action at the far edge.
+  reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 290, lyric_header_y)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5)
+  local send_presentation = reaper.ImGui_Button(ctx, "ABRIR NO HOLYRICS", 130, 24)
+  if send_presentation then
+    local ok, message = open_holyrics_presentation(state.automation_model, current_line_cue and current_line_cue.target or nil)
+    state.holyrics_remote_status = { ok = ok, message = message }
+  end
+  reaper.ImGui_PopStyleVar(ctx)
+  
   reaper.ImGui_SetCursorScreenPos(ctx, lyric_header_x + lyric_header_w - 154, lyric_header_y)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5)
   local generate_lines = reaper.ImGui_Button(ctx, "GERAR LINHAS", 120, 24)
