@@ -681,12 +681,57 @@ local function choose_project_cover()
   load_cover_image(path)
 end
 
+local function refresh_other_covers(current_proj)
+  if state.other_covers then
+    for _, c in ipairs(state.other_covers) do
+      if c.image then pcall(reaper.ImGui_Detach, ctx, c.image) end
+    end
+  end
+  state.other_covers = {}
+  local p = 0
+  while true do
+    local proj, projfn = reaper.EnumProjects(p, "")
+    if not proj then break end
+    if proj ~= current_proj and projfn and projfn ~= "" then
+      local folder = project_folder(projfn)
+      local cover_path = find_project_cover(folder)
+      local name = projfn:match("([^/\\]+)%.[Rr][Pp][Pp]$") or "Projeto"
+      local artist, title = name:match("^(.-)%s*-%s*(.+)$")
+      if artist and title then name = title end -- show just title for brevity
+      if cover_path then
+        local img = reaper.ImGui_CreateImage(cover_path)
+        if img then
+          table.insert(state.other_covers, { image = img, name = name, path = cover_path, proj = proj })
+        end
+      else
+        table.insert(state.other_covers, { image = nil, name = name, path = nil, proj = proj })
+      end
+      if #state.other_covers >= 4 then break end
+    end
+    p = p + 1
+  end
+end
+
 local function update_state()
   local now = reaper.time_precise()
   if now - state._last_check < 0.4 then return end
   state._last_check = now
 
   local proj = reaper.EnumProjects(-1)
+  
+  local proj_sig = tostring(proj) .. "||"
+  local p_idx = 0
+  while true do
+    local p_ptr, p_fn = reaper.EnumProjects(p_idx, "")
+    if not p_ptr then break end
+    proj_sig = proj_sig .. tostring(p_ptr) .. "|"
+    p_idx = p_idx + 1
+  end
+  if state._proj_sig ~= proj_sig then
+    state._proj_sig = proj_sig
+    refresh_other_covers(proj)
+  end
+
   -- Detect project change via state change counter
   local change = reaper.GetProjectStateChangeCount(proj)
   local _, proj_path = reaper.EnumProjects(-1, "")
@@ -1104,7 +1149,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local panel_y = draw_y
     local panel_h = draw_h
     -- Reserva espaco para titulo (14px) + artista (12px) + margens
-    local text_reserve = 34
+    local text_reserve = 70
     local cover_size = math.min(panel_w - 4, panel_h - text_reserve - 4)
     cover_size = math.max(40, cover_size)
     local cover_x = panel_x + (panel_w - cover_size) / 2
@@ -1156,6 +1201,36 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
       local atxt = truncate(artist, max_w)
       local aw = reaper.ImGui_CalcTextSize(ctx, atxt)
       reaper.ImGui_DrawList_AddText(draw_list, panel_x + (panel_w - aw) / 2, text_y + 16, 0xAAAAAAFF, atxt)
+    end
+
+    if state.other_covers and #state.other_covers > 0 then
+      local num = #state.other_covers
+      local mini_size = 28
+      local spacing = 8
+      local total_w = (num * mini_size) + ((num - 1) * spacing)
+      local start_x = panel_x + (panel_w - total_w) / 2
+      local start_y = text_y + 34
+      
+      for i, c in ipairs(state.other_covers) do
+        local mx = start_x + (i - 1) * (mini_size + spacing)
+        if c.image then
+          local ok_img = pcall(reaper.ImGui_DrawList_AddImageRounded, draw_list, c.image, mx, start_y, mx + mini_size, start_y + mini_size, 0, 0, 1, 1, 0xFFFFFFFF, 4)
+          if not ok_img then
+            reaper.ImGui_SetCursorScreenPos(ctx, mx, start_y)
+            reaper.ImGui_Image(ctx, c.image, mini_size, mini_size)
+          end
+        else
+          reaper.ImGui_DrawList_AddRectFilled(draw_list, mx, start_y, mx + mini_size, start_y + mini_size, 0x333333FF, 4)
+          reaper.ImGui_DrawList_AddRect(draw_list, mx, start_y, mx + mini_size, start_y + mini_size, 0x555555FF, 4, 0, 1)
+        end
+        local cx, cy = reaper.ImGui_GetMousePos(ctx)
+        if cx >= mx and cx <= mx + mini_size and cy >= start_y and cy <= start_y + mini_size then
+          reaper.ImGui_SetTooltip(ctx, c.name)
+          if reaper.ImGui_IsMouseClicked(ctx, 0) then
+            reaper.SelectProjectInstance(c.proj)
+          end
+        end
+      end
     end
   elseif grid_w > 100 then -- Só desenha se houver espaço (usuário não escondeu o TCP)
     local cols = 6
