@@ -1508,7 +1508,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     -- layout em vez de coordenadas absolutas, que o ImGui rejeita fora dela.
     local _, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
     local preview_h = math.max(1, math.min(draw_h, available_h))
-    local preview_visible = reaper.ImGui_BeginChild(ctx, "##live_preview_container", 0, preview_h, reaper.ImGui_ChildFlags_None())
+    local preview_visible = reaper.ImGui_BeginChild(ctx, "##live_preview_container", 0, preview_h, 0)
     if preview_visible then
       if render_automation_preview then
         render_automation_preview(ctx, false)
