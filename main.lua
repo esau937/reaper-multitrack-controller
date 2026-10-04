@@ -1486,25 +1486,6 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   local row1_y = marker_y - (marker_h + gap) * 2
   local row2_y = marker_y - marker_h - gap
 
-  -- Os acordes ocupam esta área no ensaio. Ao vivo, ela fica reservada para
-  -- a prévia do Holyrics.
-  if not state.live_mode then
-    local pitch_state = state.pitch_projects[tostring(proj)]
-    local chord, next_chord, automatic = Chords.display(json, pitch_state and pitch_state.offset or 0)
-    if chord == "SEM MAPA" and state.chord_analysis_status then
-      chord = string.upper(state.chord_analysis_status)
-    end
-    local chord_y = row1_y - 48
-    reaper.ImGui_DrawList_PushClipRect(draw_list, marker_x, chord_y, marker_x + combined_w, row1_y - 2, true)
-    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y, C.text_dim, automatic and (Chords.is_simplified() and "AUTO · SIMPLES" or "ACORDE · AUTO") or "ACORDE")
-    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y, C.text_dim, "PRÓXIMO")
-    push_font_compat(font_large, 18)
-    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y + 19, C.accent, chord)
-    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y + 19, C.text, next_chord)
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_DrawList_PopClipRect(draw_list)
-  end
-
   -- Modo ao vivo: painel direito exibe preview do Holyrics
   if state.live_mode then
     -- A docka pode mudar de tamanho durante o frame. Usa o fluxo normal de
