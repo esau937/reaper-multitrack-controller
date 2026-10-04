@@ -1504,17 +1504,11 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
 
   -- Modo ao vivo: painel direito exibe preview do Holyrics
   if state.live_mode then
-    local content_min_x, content_min_y = reaper.ImGui_GetWindowContentRegionMin(ctx)
-    local content_max_x, content_max_y = reaper.ImGui_GetWindowContentRegionMax(ctx)
-    local min_x, min_y = wx + content_min_x, wy + content_min_y
-    local max_x, max_y = wx + content_max_x, wy + content_max_y
-    local right_x = math.max(min_x, math.min(marker_x, max_x - 1))
-    local right_y = math.max(min_y, math.min(draw_y, max_y - 1))
-    local right_w = math.max(1, math.min(combined_w, max_x - right_x))
-    local right_h = math.max(1, math.min(draw_h, max_y - right_y))
-    reaper.ImGui_SetCursorScreenPos(ctx, right_x, right_y)
-
-    local preview_visible = reaper.ImGui_BeginChild(ctx, "##live_preview_container", right_w, right_h, reaper.ImGui_ChildFlags_None())
+    -- A docka pode mudar de tamanho durante o frame. Usa o fluxo normal de
+    -- layout em vez de coordenadas absolutas, que o ImGui rejeita fora dela.
+    local _, available_h = reaper.ImGui_GetContentRegionAvail(ctx)
+    local preview_h = math.max(1, math.min(draw_h, available_h))
+    local preview_visible = reaper.ImGui_BeginChild(ctx, "##live_preview_container", 0, preview_h, reaper.ImGui_ChildFlags_None())
     if preview_visible then
       if render_automation_preview then
         render_automation_preview(ctx, false)
