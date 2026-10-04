@@ -1175,8 +1175,8 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
     local panel_h = wh - 10 -- Permite usar a altura real da janela em vez de travar em 152px
     -- Reserva espaco para titulo (14px) + artista (12px) + margens
     local text_reserve = 50
-    local cover_size = math.min(panel_w - 4, panel_h - text_reserve - 10)
-    cover_size = math.min(cover_size, math.max(100, panel_w * 0.55)) -- Limita para deixar espaco para a setlist na esquerda
+    -- No modo Ao Vivo, a capa e o elemento principal do painel esquerdo.
+    local cover_size = math.min(panel_w - 12, panel_h - text_reserve - 10)
     cover_size = math.max(40, cover_size)
     local axis_x = panel_x + panel_w - 16 - (cover_size / 2)
     local cover_x = axis_x - (cover_size / 2)
@@ -1486,21 +1486,24 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   local row1_y = marker_y - (marker_h + gap) * 2
   local row2_y = marker_y - marker_h - gap
 
-  -- Chords sit above the right-hand button grid, in the unused header space.
-  local pitch_state = state.pitch_projects[tostring(proj)]
-  local chord, next_chord, automatic = Chords.display(json, pitch_state and pitch_state.offset or 0)
-  if chord == "SEM MAPA" and state.chord_analysis_status then
-    chord = string.upper(state.chord_analysis_status)
+  -- Os acordes ocupam esta área no ensaio. Ao vivo, ela fica reservada para
+  -- a prévia do Holyrics.
+  if not state.live_mode then
+    local pitch_state = state.pitch_projects[tostring(proj)]
+    local chord, next_chord, automatic = Chords.display(json, pitch_state and pitch_state.offset or 0)
+    if chord == "SEM MAPA" and state.chord_analysis_status then
+      chord = string.upper(state.chord_analysis_status)
+    end
+    local chord_y = row1_y - 48
+    reaper.ImGui_DrawList_PushClipRect(draw_list, marker_x, chord_y, marker_x + combined_w, row1_y - 2, true)
+    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y, C.text_dim, automatic and (Chords.is_simplified() and "AUTO · SIMPLES" or "ACORDE · AUTO") or "ACORDE")
+    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y, C.text_dim, "PRÓXIMO")
+    push_font_compat(font_large, 18)
+    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y + 19, C.accent, chord)
+    reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y + 19, C.text, next_chord)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_DrawList_PopClipRect(draw_list)
   end
-  local chord_y = row1_y - 48
-  reaper.ImGui_DrawList_PushClipRect(draw_list, marker_x, chord_y, marker_x + combined_w, row1_y - 2, true)
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y, C.text_dim, automatic and (Chords.is_simplified() and "AUTO · SIMPLES" or "ACORDE · AUTO") or "ACORDE")
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y, C.text_dim, "PRÓXIMO")
-  push_font_compat(font_large, 18)
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 4, chord_y + 19, C.accent, chord)
-  reaper.ImGui_DrawList_AddText(draw_list, marker_x + 144, chord_y + 19, C.text, next_chord)
-  reaper.ImGui_PopFont(ctx)
-  reaper.ImGui_DrawList_PopClipRect(draw_list)
 
   -- Modo ao vivo: painel direito exibe preview do Holyrics
   if state.live_mode then
@@ -3506,7 +3509,6 @@ end
 render_automation_preview = function(ctx, show_settings)
   local model = state.automation_model
   if not model or #model.lyrics.lines == 0 then
-    reaper.ImGui_TextDisabled(ctx, "Gere e mapeie a letra antes de abrir a prévia.")
     return
   end
 
