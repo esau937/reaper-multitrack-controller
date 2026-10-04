@@ -2207,19 +2207,14 @@ local function render_render_modal(ctx, win_x, win_y, win_w, win_h)
     if reaper.ImGui_Button(ctx, "RENDERIZAR", btn_w, 30) then
       save_render_settings()
 
-      -- A janela de render precisa receber estas preferências, mas elas não devem
-      -- contaminar a configuração persistente do projeto após ser aberta.
-      local _, old_render_file = reaper.GetSetProjectInfo_String(0, "RENDER_FILE", "", false)
-      local _, old_render_format = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "", false)
-      local old_render_settings = reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", 0, false)
-      local old_bounds_flag = reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", 0, false)
-      
       local proj_path = reaper.GetProjectPathEx(0, "")
       local out_path = state.render_path
       if not out_path or out_path == "" then out_path = proj_path end
       reaper.GetSetProjectInfo_String(0, "RENDER_FILE", out_path, true)
       
-      local fmt = state.render_format == "MP3" and "l3pm" or "wave"
+      -- RENDER_FORMAT usa o identificador interno de quatro bytes do REAPER.
+      -- WAV e gravado como "evaw" (wave em little-endian), nao "wave".
+      local fmt = state.render_format == "MP3" and "l3pm" or "evaw"
       reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", string.pack("c4", fmt), true)
       
       if state.render_mode == "PISTAS" then
@@ -2234,10 +2229,6 @@ local function render_render_modal(ctx, win_x, win_y, win_w, win_h)
       end
       
       reaper.Main_OnCommand(42230, 0)
-      reaper.GetSetProjectInfo_String(0, "RENDER_FILE", old_render_file or "", true)
-      reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", old_render_format or "", true)
-      reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", old_render_settings, true)
-      reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", old_bounds_flag, true)
       state.show_render_modal = false
     end
     reaper.ImGui_PopStyleColor(ctx, 3)
