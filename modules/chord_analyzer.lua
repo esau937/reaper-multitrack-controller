@@ -73,39 +73,9 @@ local function create_render(proj, project_path, tracks)
 end
 
 function Analyzer.ensure(proj, project_path, script_path)
-  if not project_path or project_path == "" then return "Aguardando projeto ser salvo" end
-  local output = project_path .. ".chords.json"
-  if reaper.file_exists(output) then return "Pronto" end
-  local error_file = output .. ".error"
-  if reaper.file_exists(error_file) then
-    local file = io.open(error_file, "r")
-    local message = file and file:read("*l") or "falha desconhecida"
-    if file then file:close() end
-    return "Falha na análise: " .. (message or "falha desconhecida")
-  end
-  if (reaper.GetPlayState() & 1) ~= 0 then return "Aguardando parar" end
-  if pending[project_path] then return "Analisando" end
-  local tracks, names = source_tracks(proj)
-  if #tracks == 0 then return "Aguardando pistas PIANO e BASS/BAIXO" end
-  pending[project_path] = true
-  local input, err = create_render(proj, project_path, tracks)
-  if not input then pending[project_path] = nil; return err end
-  local python = os.getenv("LOCALAPPDATA") .. "\\Programs\\Python\\Python311\\python.exe"
-  local script = script_path .. "tools\\analyze_chords.py"
-  local launcher = script_path .. "tools\\run_hidden.vbs"
-  os.remove(error_file)
-  -- `wscript.exe` is on Windows' executable path. Do not depend on WINDIR:
-  -- REAPER can run scripts with a reduced environment where that variable is absent.
-  local command = quote("wscript.exe") .. " " .. quote(launcher) .. " " ..
-    quote(python) .. " " .. quote(script) .. " " .. quote(input) .. " " .. quote(output)
-  for _, name in ipairs(names) do command = command .. " " .. quote(name) end
-  -- wscript returns immediately after starting Python, so REAPER never blocks.
-  local started, start_error = pcall(reaper.ExecProcess, command, -1)
-  if not started then
-    pending[project_path] = nil
-    return "Falha ao iniciar análise: " .. tostring(start_error)
-  end
-  return "Analisando"
+  -- O mapa so e lido quando ja existe. A analise automatica exigia um render
+  -- temporario de piano e baixo e foi desativada para nao abrir o render do REAPER.
+  return Analyzer.status(project_path) or "Mapa de acordes não encontrado"
 end
 
 function Analyzer.status(project_path)
