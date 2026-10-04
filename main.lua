@@ -2205,31 +2205,7 @@ local function render_render_modal(ctx, win_x, win_y, win_w, win_h)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), C.accent_hover)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), C.accent)
     if reaper.ImGui_Button(ctx, "RENDERIZAR", btn_w, 30) then
-      save_render_settings()
-
-      local proj_path = reaper.GetProjectPathEx(0, "")
-      local out_path = state.render_path
-      if not out_path or out_path == "" then out_path = proj_path end
-      reaper.GetSetProjectInfo_String(0, "RENDER_FILE", out_path, true)
-      
-      -- RENDER_FORMAT usa o identificador interno de quatro bytes do REAPER.
-      -- WAV e gravado como "evaw" (wave em little-endian), nao "wave".
-      local fmt = state.render_format == "MP3" and "l3pm" or "evaw"
-      reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", string.pack("c4", fmt), true)
-      
-      if state.render_mode == "PISTAS" then
-        reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", 1, true)
-        reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", 1, true)
-      elseif state.render_mode == "REGIOES" then
-        reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", 0, true)
-        reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", 4, true)
-      else
-        reaper.GetSetProjectInfo(0, "RENDER_SETTINGS", 0, true)
-        reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", 1, true)
-      end
-      
-      -- Renderizacao desativada no controlador: nunca dispare o render do REAPER
-      -- a partir desta interface. Isto evita abrir a rotina de render do projeto.
+      -- A funcao de render esta desativada e nao altera o projeto.
       reaper.ShowMessageBox("A renderizacao pelo Multitrack Controller esta desativada.", "Multitrack Controller", 0)
       state.show_render_modal = false
     end
