@@ -1506,8 +1506,8 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
   if state.live_mode then
     local content_min_x, content_min_y = reaper.ImGui_GetWindowContentRegionMin(ctx)
     local content_max_x, content_max_y = reaper.ImGui_GetWindowContentRegionMax(ctx)
-    local min_x, min_y = win_x + content_min_x, win_y + content_min_y
-    local max_x, max_y = win_x + content_max_x, win_y + content_max_y
+    local min_x, min_y = wx + content_min_x, wy + content_min_y
+    local max_x, max_y = wx + content_max_x, wy + content_max_y
     local right_x = math.max(min_x, math.min(marker_x, max_x - 1))
     local right_y = math.max(min_y, math.min(draw_y, max_y - 1))
     local right_w = math.max(1, math.min(combined_w, max_x - right_x))
