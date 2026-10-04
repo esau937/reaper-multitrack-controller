@@ -2228,7 +2228,9 @@ local function render_render_modal(ctx, win_x, win_y, win_w, win_h)
         reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", 1, true)
       end
       
-      reaper.Main_OnCommand(42230, 0)
+      -- Renderizacao desativada no controlador: nunca dispare o render do REAPER
+      -- a partir desta interface. Isto evita abrir a rotina de render do projeto.
+      reaper.ShowMessageBox("A renderizacao pelo Multitrack Controller esta desativada.", "Multitrack Controller", 0)
       state.show_render_modal = false
     end
     reaper.ImGui_PopStyleColor(ctx, 3)
