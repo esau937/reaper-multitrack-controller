@@ -1193,9 +1193,8 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
       -- Desenha imagem com cantos arredondados via DrawList
       local ok_img, _ = pcall(reaper.ImGui_DrawList_AddImageRounded, draw_list, state.cover_image, ix, iy, ix + dw, iy + dh, 0, 0, 1, 1, 0xFFFFFFFF, corner_r)
       if not ok_img then
-        -- Fallback: sem arredondamento
-        reaper.ImGui_SetCursorScreenPos(ctx, ix, iy)
-        reaper.ImGui_Image(ctx, state.cover_image, dw, dh)
+        -- Fallback sem widget ImGui: evita posicionar o cursor fora da docka.
+        reaper.ImGui_DrawList_AddImage(draw_list, state.cover_image, ix, iy, ix + dw, iy + dh)
       end
       text_y = iy + dh + 5
     else
@@ -1241,8 +1240,7 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
           if c.image then
             local ok_img = pcall(reaper.ImGui_DrawList_AddImageRounded, draw_list, c.image, list_x, list_y, list_x + item_h, list_y + item_h, 0, 0, 1, 1, 0xFFFFFFFF, 4)
             if not ok_img then
-              reaper.ImGui_SetCursorScreenPos(ctx, list_x, list_y)
-              reaper.ImGui_Image(ctx, c.image, item_h, item_h)
+              reaper.ImGui_DrawList_AddImage(draw_list, c.image, list_x, list_y, list_x + item_h, list_y + item_h)
             end
           else
             reaper.ImGui_DrawList_AddRectFilled(draw_list, list_x, list_y, list_x + item_h, list_y + item_h, 0x333333FF, 4)
@@ -1506,18 +1504,23 @@ local function render_waveform_area(draw_list, wx, wy, ww, wh)
 
   -- Modo ao vivo: painel direito exibe preview do Holyrics
   if state.live_mode then
-    local right_x = marker_x
-    local right_w = combined_w
-    local right_y = draw_y
-    local right_h = draw_h
+    local content_min_x, content_min_y = reaper.ImGui_GetWindowContentRegionMin(ctx)
+    local content_max_x, content_max_y = reaper.ImGui_GetWindowContentRegionMax(ctx)
+    local min_x, min_y = win_x + content_min_x, win_y + content_min_y
+    local max_x, max_y = win_x + content_max_x, win_y + content_max_y
+    local right_x = math.max(min_x, math.min(marker_x, max_x - 1))
+    local right_y = math.max(min_y, math.min(draw_y, max_y - 1))
+    local right_w = math.max(1, math.min(combined_w, max_x - right_x))
+    local right_h = math.max(1, math.min(draw_h, max_y - right_y))
     reaper.ImGui_SetCursorScreenPos(ctx, right_x, right_y)
-    
-    if reaper.ImGui_BeginChild(ctx, "##live_preview_container", right_w, right_h, reaper.ImGui_ChildFlags_None()) then
+
+    local preview_visible = reaper.ImGui_BeginChild(ctx, "##live_preview_container", right_w, right_h, reaper.ImGui_ChildFlags_None())
+    if preview_visible then
       if render_automation_preview then
         render_automation_preview(ctx, false)
       end
-      reaper.ImGui_EndChild(ctx)
     end
+    reaper.ImGui_EndChild(ctx)
     
     return  -- nao desenha os botoes normais
   end
